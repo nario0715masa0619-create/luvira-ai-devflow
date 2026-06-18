@@ -1,113 +1,45 @@
 # Change Log
 
-## 概要
-
-このドキュメントは、Luvira AI DevFlow の運用ルール、ワークフロー、役割分担、承認基準の変更履歴を記録するためのものです。
-
-目的は、
-- いつ何を変えたかを追えるようにすること
-- なぜ変更したのかを後から確認できるようにすること
-- 個別案件の一時対応と、標準基盤への正式反映を区別すること
-
-にあります。
-
----
-
-## 記録ルール
-
-- 変更は日付単位で記録する
-- 変更内容だけでなく、理由も残す
-- 一時対応か恒久対応かを明記する
-- 関連ドキュメントがあれば併記する
-
----
-
-## テンプレート
-
-### YYYY-MM-DD
-
-- 種別: 追加 / 変更 / 削除
-- 対象: `docs/xxxxx.md`
-- 区分: 一時対応 / 恒久対応
-- 内容:
-  - 
-- 理由:
-  - 
-- 関連Issue / PR:
-  - 
-- 備考:
-  - 
-
----
-
-## 初期記録
-
-### 2026-06-18
-
-- 種別: 追加
-- 対象:
-  - `README.md`
-  - `docs/workflow-standard.md`
-  - `docs/roles-and-responsibilities.md`
-  - `docs/approval-rules.md`
-  - `docs/project-constitution.md`
-- 区分: 恒久対応
-- 内容:
-  - Luvira AI DevFlow の初期ドキュメント一式を作成した
-  - 標準ワークフロー、役割分担、承認ルール、共通憲章を定義した
-- 理由:
-  - AI開発の標準基盤をGitHub上で管理し、今後の案件に共通適用できる状態を作るため
-- 関連Issue / PR:
-  - 未設定
-- 備考:
-  - 今後の運用でルールやワークフローは継続的に見直す
-
----
-
 ## 運用記録
 
-ここからは、初期構築後の継続的な変更・改善を記録します。
+### 2026-06-18 — DevFlow v0.2 整合性整理と外部SaaS導入モード追加
 
-### 2026-06-18 (整合性レビュー反映)
+#### 変更概要
 
-- 種別: 変更
-- 対象:
-  - `README.md`
-  - `docs/workflow-standard.md`
-  - `docs/roles-and-responsibilities.md`
-  - `docs/approval-rules.md`
-  - `docs/project-constitution.md`
-  - `docs/decision-log.md`
-- 区分: 恒久対応
-- 内容:
-  - README / workflow-standard / roles-and-responsibilities / approval-rules / project-constitution / decision-log / change-log の整合性チェックを実施した
-  - 役割分担の表記揺れ(GSPA起動主体、Human/GAIC/Perplexityの境界、承認行為を指す動詞など)を統一した
-  - `approval-rules.md` に「新規ライブラリ・SaaS・依存パッケージの追加」カテゴリを新設した(DEC-005)
-  - 「永続化構造の変更」「権限管理・権限設計に関わる変更」の用語表記を `approval-rules.md` に統一した(DEC-006)
-  - GSPAの節目レビューを原則自動実施とし、Humanの関与をスキップ判断に限定する方針を明文化した(DEC-007)
-  - `project-constitution.md` に「禁止事項」と「要承認事項」の関係性を明記した
-  - `README.md` にdecision-log.mdを文書構成・最初に読むべきドキュメントへ追加した
-  - 個別案件専用の旧ワークフロー文書(`ai-workflow-genspark-antigravity.md`, `luvira-ai-devflow-workflow-standard.md`)を `docs/archive/` へ移動する方針をREADME.mdに明記した(DEC-008)
-- 理由:
-  - 各ドキュメントが個別に役割定義・承認基準を保持していたことで生じていたズレを解消し、今後の改訂でのドリフトを防ぐため
-- 関連Issue / PR:
-  - 未設定
-- 備考:
-  - 判断の詳細な背景・理由は `docs/decision-log.md` のDEC-005〜DEC-008を参照
-  - 旧ワークフロー文書2点の実際の移動・削除作業は別タスクとして実施し、完了後に本ログへ追記する
+- `docs/workflow-standard.md` を更新し、判断レイヤーの整理、承認動詞の統一、Perplexity → GSPA のエスカレーション順序の明文化、差戻し対応の独立フェーズ化を反映した。
+- `docs/workflow-standard.md` に「外部SaaS導入モード」を追加し、GUI依存タスクを標準ワークフローの正式対象として定義した。
+- `docs/workflow-standard.md` において Railway 導入タスクの完了条件を「Public Domain の公開URL取得」に統一した。Railway の公開URLは Settings の Networking から Generate Domain により取得できる。[cite:395][cite:407]
+- `docs/roles-and-responsibilities.md` を更新し、Human / Perplexity / GSPA / GAIC / Claude / n8n / Antigravity の責務境界を再整理した。
+- `docs/roles-and-responsibilities.md` に Browser Automation Agent を追加し、GUI依存タスクの実行担当として定義した。
+- `docs/roles-and-responsibilities.md` に Human の専用操作として、ログイン、2FA、CAPTCHA、決済、法的同意を追加した。Human-in-the-loop 方式では、人間がライブセッションで介入後に自動化を再開できる。[cite:396][cite:398][cite:403]
+- `README.md` を更新し、役割表を `docs/roles-and-responsibilities.md` の全体像表と同期した。
+- `README.md` の「最初に読むべきドキュメント」と「ドキュメント構成」に `docs/decision-log.md` を追加した。
+- `README.md` に、`docs/archive/` を旧設計書・案件依存ドキュメントの退避先として扱う方針を明記した。
+- `README.md` に、外部SaaS導入は n8n とブラウザ自動化エージェントを組み合わせて扱う標準運用であることを追記した。Browser Use は n8n から HTTP 統合または community node で利用できる。[cite:373][cite:370][cite:361]
 
-### 2026-06-18 (旧ドキュメントのarchive移動完了)
+#### 背景
 
-- 種別: 変更
-- 対象:
-  - i-workflow-genspark-antigravity.md
-  - luvira-ai-devflow-workflow-standard.md
-- 区分: 恒久対応
-- 内容:
-  - 個別案件専用の旧ワークフロー文書2点を、リポジトリルートから docs/archive/ へ移動した
-- 理由:
-  - DEC-008で決定した方針(現行の標準ワークフローと内容が一致しない個別案件専用文書をarchiveへ分離する)を実行に移したため
-- 関連Issue / PR:
-  - 未設定
-- 備考:
-  - これにより、上記の「整合性レビュー反映」エントリで残タスクとしていた移動作業が完了した
+- 役割分担の表現揺れ、承認対象の分散管理、Perplexity / GSPA / Human の境界の曖昧さを解消する必要があった。
+- Railway のような GUI 主体の初期設定作業や、今後の外部SaaS導入を個別テンプレート量産で処理すると、保守コストが増大する懸念があった。
+- そのため、個別SaaS別テンプレートではなく、Human-in-the-Loop 前提の共通ブラウザ自動化レイヤーを標準フローとして採用した。[cite:396][cite:414][cite:419]
+
+#### 方針
+
+- 承認や差戻しに関する論点整理は、まず Perplexity が担当する。
+- 設計レベルの懸念が残る場合のみ GSPA へエスカレーションする。
+- GUI依存タスクは n8n をハブとして実行し、Human 専用操作だけを人間介入点として停止させる。
+- Railway 導入では、公開URLの取得時点で完了とし、アプリ応答確認は別タスクに切り分ける。[cite:395][cite:396][cite:373]
+
+#### 関連判断
+
+- DEC-005: 承認カテゴリへの「新規ライブラリ・SaaS・依存パッケージの追加」新設。
+- DEC-006: 用語統一（永続化構造 / 権限管理・権限設計 など）。
+- DEC-007: GSPA 起動は節目で原則自動実施、Human はスキップ判断のみ。
+- DEC-008: 旧ドキュメントは `docs/archive/` へ退避する方針。
+- DEC-009: 外部SaaS導入は Human-in-the-Loop の共通ブラウザ自動化レイヤーを標準採用する。
+- DEC-010: Railway 導入タスクの完了条件は Public Domain の公開URL取得とする。[cite:395][cite:407]
+
+#### 追記事項
+
+- `ai-workflow-genspark-antigravity.md` と `luvira-ai-devflow-workflow-standard.md` の実体移動または削除は未実施。方針のみ明記済み。
+- `docs/archive/` の作成と旧ファイル退避を実施した場合は、本 change-log に追記する。
