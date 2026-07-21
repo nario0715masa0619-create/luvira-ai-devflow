@@ -116,3 +116,24 @@ Change Log が「何を変えたか」を記録するのに対し、Decision Log
   - `docs/workflow-standard.md`
   - `docs/approval-rules.md`
   - `docs/project-constitution.md`
+
+### DEC-005: 自律開発環境v1設計書の正式導入と既存標準との突合
+
+- 日付: 2026-07-21
+- ステータス: 採用
+- 背景:
+  - 既存の標準ワークフロー群に加え、n8nを司令塔とした半自律ワークフローの全体設計（v1）を明文化し、共通基盤に統合する必要があった
+- 決定:
+  - `docs/autonomous-dev-environment-v1.md` およびそのレビューノートをリポジトリに正式追加し、`README.md`からの導線を設定する
+  - 既存の標準ワークフロー群（`workflow-standard.md`等）との突合を実施し、抽出された矛盾点・ズレについては今回は既存ファイルの直接編集を行わず、今後の修正方針として当ログに記録・提案するにとどめる
+- 理由:
+  - v1設計書と既存標準との間に、承認ゲートのタイミング（実装後vs実装前）や登場するAIの役割定義（GSPA/GAICの有無など）に大きなズレがあるため、段階的なすり合わせが必要と判断したため
+- 却下した案:
+  - 今回の導入と同時に既存ファイルを全修正する案（影響が大きく、上位/下位の設計思想の調整が必要なため保留）
+- 見直し条件:
+  - v1設計書のフローと既存の標準ワークフローを統合する具体的な修正方針が決まった段階で、両者のファイルを編集する
+- 関連ドキュメント:
+  - `docs/autonomous-dev-environment-v1.md`
+  - `docs/workflow-standard.md`
+  - `docs/roles-and-responsibilities.md`
+  - `docs/approval-rules.md`
