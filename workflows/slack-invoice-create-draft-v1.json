@@ -1,0 +1,319 @@
+{
+  "id": "slack-invoice-create-draft-v1",
+  "name": "slack-invoice-create-draft-v1",
+  "active": false,
+  "nodes": [
+    {
+      "id": "wh-slash-command",
+      "name": "Webhook - Slash Command",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1200, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack/invoice-command",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "webhookId": "slack-invoice-command-v1"
+    },
+    {
+      "id": "code-verify-build-modal",
+      "name": "Verify & Build Modal",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-960, 0],
+      "notes": "Slack署名検証(v0)+ /invoice モーダルのBlock Kit定義を組み立てる。SLACK_SIGNING_SECRETは環境変数から取得(コード内にベタ書きしない)。",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\n\nconst headers = $json.headers;\n// Webhookノードのoptions.rawBody:trueは生ボディをbinary.data.data(base64)へ格納する。\n// bare $binary は n8n(JS Task Runner)の静的built-ins解析で認識されず未定義になるため、\n// $input経由(認識対象)でアイテムを取得してからbinaryを読む必要がある(実機検証で確認済み)。\nconst item = $input.first();\nconst rawBody = item.binary?.data?.data\n  ? Buffer.from(item.binary.data.data, 'base64').toString('utf-8')\n  : '';\nconst timestamp = headers['x-slack-request-timestamp'];\nconst sigHeader = headers['x-slack-signature'];\nconst signingSecret = $env.SLACK_SIGNING_SECRET;\n\n// リプレイ攻撃対策: 5分以上ずれたタイムスタンプは拒否\nconst fiveMinutes = 60 * 5;\nif (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > fiveMinutes) {\n  throw new Error('Slack request timestamp too old (possible replay)');\n}\n\nconst baseString = `v0:${timestamp}:${rawBody}`;\nconst hmac = crypto.createHmac('sha256', signingSecret).update(baseString).digest('hex');\nconst expectedSig = `v0=${hmac}`;\n\nif (expectedSig !== sigHeader) {\n  throw new Error('Invalid Slack signature (slash command)');\n}\n\nconst body = $json.body; // command, text, user_id, user_name, trigger_id, channel_id, response_url\nconst today = new Date().toISOString().slice(0, 10);\n\nconst modal_view = {\n  type: 'modal',\n  callback_id: 'invoice_create_modal',\n  title: { type: 'plain_text', text: '請求書ドラフト作成' },\n  submit: { type: 'plain_text', text: '作成' },\n  close: { type: 'plain_text', text: 'キャンセル' },\n  blocks: [\n    {\n      type: 'input',\n      block_id: 'client_name_block',\n      label: { type: 'plain_text', text: '取引先名' },\n      element: { type: 'plain_text_input', action_id: 'client_name_action' }\n    },\n    {\n      type: 'input',\n      block_id: 'amount_block',\n      label: { type: 'plain_text', text: '金額' },\n      element: { type: 'plain_text_input', action_id: 'amount_action', placeholder: { type: 'plain_text', text: '例: 300000' } }\n    },\n    {\n      type: 'input',\n      block_id: 'currency_block',\n      optional: true,\n      label: { type: 'plain_text', text: '通貨' },\n      element: { type: 'plain_text_input', action_id: 'currency_action', initial_value: 'JPY' }\n    },\n    {\n      type: 'input',\n      block_id: 'subject_block',\n      optional: true,\n      label: { type: 'plain_text', text: '件名 / 案件名' },\n      element: { type: 'plain_text_input', action_id: 'subject_action' }\n    },\n    {\n      type: 'input',\n      block_id: 'issue_date_block',\n      optional: true,\n      label: { type: 'plain_text', text: '請求日' },\n      element: { type: 'datepicker', action_id: 'issue_date_action', initial_date: today }\n    },\n    {\n      type: 'input',\n      block_id: 'due_date_block',\n      label: { type: 'plain_text', text: '支払期日' },\n      element: { type: 'datepicker', action_id: 'due_date_action' }\n    }\n  ]\n};\n\nreturn [{ json: { trigger_id: body.trigger_id, modal_view } }];\n"
+      }
+    },
+    {
+      "id": "http-open-modal",
+      "name": "Open Modal (views.open)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-720, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/views.open",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ trigger_id: $json.trigger_id, view: $json.modal_view }) }}",
+        "options": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Slack account (Bot Token)"
+        }
+      }
+    },
+    {
+      "id": "respond-ok-slash",
+      "name": "Respond OK - Slash",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-480, 0],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "wh-interactivity",
+      "name": "Webhook - Interactivity",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1200, 320],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack/invoice-interactivity",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "webhookId": "slack-invoice-interactivity-v1"
+    },
+    {
+      "id": "code-verify-parse-payload",
+      "name": "Verify & Parse Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-960, 320],
+      "notes": "Slack署名検証(v0)+ view_submission payloadのパース。",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const crypto = require('crypto');\n\nconst headers = $json.headers;\n// Webhookノードのoptions.rawBody:trueは生ボディをbinary.data.data(base64)へ格納する。\n// bare $binary は n8n(JS Task Runner)の静的built-ins解析で認識されず未定義になるため、\n// $input経由(認識対象)でアイテムを取得してからbinaryを読む必要がある(実機検証で確認済み)。\nconst item = $input.first();\nconst rawBody = item.binary?.data?.data\n  ? Buffer.from(item.binary.data.data, 'base64').toString('utf-8')\n  : '';\nconst timestamp = headers['x-slack-request-timestamp'];\nconst sigHeader = headers['x-slack-signature'];\nconst signingSecret = $env.SLACK_SIGNING_SECRET;\n\nconst fiveMinutes = 60 * 5;\nif (Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp)) > fiveMinutes) {\n  throw new Error('Slack request timestamp too old (possible replay)');\n}\n\nconst baseString = `v0:${timestamp}:${rawBody}`;\nconst hmac = crypto.createHmac('sha256', signingSecret).update(baseString).digest('hex');\nconst expectedSig = `v0=${hmac}`;\n\nif (expectedSig !== sigHeader) {\n  throw new Error('Invalid Slack signature (interactivity)');\n}\n\nconst payload = JSON.parse($json.body.payload);\nreturn [{ json: { payload } }];\n"
+      }
+    },
+    {
+      "id": "code-validate-build-invoice",
+      "name": "Validate & Build Invoice",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-720, 320],
+      "notes": "validate_and_build_invoice: 必須項目チェック・amount数値チェック・invoice_id生成(タイムスタンプ+ランダムID方式)。",
+      "parameters": {
+        "language": "javaScript",
+        "jsCode": "const payload = $json.payload;\n\nif (payload.type !== 'view_submission' || payload.view?.callback_id !== 'invoice_create_modal') {\n  return [{ json: { is_valid: false, error_type: 'unexpected_payload', slack_view_errors: null } }];\n}\n\nconst values = payload.view.state.values;\n\nfunction getText(blockId, actionId) {\n  return values[blockId]?.[actionId]?.value ?? null;\n}\nfunction getDate(blockId, actionId) {\n  return values[blockId]?.[actionId]?.selected_date ?? null;\n}\n\nconst client_name = getText('client_name_block', 'client_name_action');\nconst amountRaw = getText('amount_block', 'amount_action');\nconst currency = getText('currency_block', 'currency_action') || 'JPY';\nconst subject = getText('subject_block', 'subject_action') || '';\nconst issue_date = getDate('issue_date_block', 'issue_date_action') || new Date().toISOString().slice(0, 10);\nconst due_date = getDate('due_date_block', 'due_date_action');\n\nconst errors = {};\nif (!client_name) errors['client_name_block'] = '取引先名は必須です';\nif (!amountRaw) {\n  errors['amount_block'] = '金額は必須です';\n} else if (Number.isNaN(Number(amountRaw))) {\n  errors['amount_block'] = '金額は数値で入力してください';\n}\nif (!due_date) errors['due_date_block'] = '支払期日は必須です';\n\nif (Object.keys(errors).length > 0) {\n  return [{\n    json: {\n      is_valid: false,\n      error_type: 'validation_error',\n      slack_view_errors: { response_action: 'errors', errors }\n    }\n  }];\n}\n\nconst now = new Date();\nconst dateStr = now.toISOString().slice(0, 10).replace(/-/g, '');\nconst randomSuffix = Math.random().toString(36).slice(2, 5).toUpperCase();\nconst invoice_id = `INV-${dateStr}-${randomSuffix}`;\n\nreturn [{\n  json: {\n    is_valid: true,\n    invoice_id,\n    client_name,\n    amount: Number(amountRaw),\n    currency,\n    subject,\n    issue_date,\n    due_date,\n    status: 'draft',\n    created_by: payload.user?.username || payload.user?.id,\n    created_at: now.toISOString(),\n    slack_user_id: payload.user?.id\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "if-is-valid",
+      "name": "IF - Is Valid",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [-480, 320],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{$json.is_valid}}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      }
+    },
+    {
+      "id": "respond-ok-interactivity",
+      "name": "Respond OK - Interactivity",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-240, 220],
+      "parameters": {
+        "respondWith": "text",
+        "responseBody": "",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "respond-errors-modal",
+      "name": "Respond Errors - Modal",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [-240, 460],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json.slack_view_errors) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "gsheets-append-invoice",
+      "name": "Google Sheets - Append Invoice",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [0, 220],
+      "onError": "continueErrorOutput",
+      "notes": "Document ID / Sheet名は環境変数(INVOICE_SHEET_DOCUMENT_ID / INVOICE_SHEET_NAME)で差し替え可能。",
+      "parameters": {
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.INVOICE_SHEET_DOCUMENT_ID}}"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.INVOICE_SHEET_NAME || 'Invoices'}}"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "invoice_id": "={{$json.invoice_id}}",
+            "client_name": "={{$json.client_name}}",
+            "amount": "={{$json.amount}}",
+            "currency": "={{$json.currency}}",
+            "subject": "={{$json.subject}}",
+            "issue_date": "={{$json.issue_date}}",
+            "due_date": "={{$json.due_date}}",
+            "status": "={{$json.status}}",
+            "created_by": "={{$json.created_by}}",
+            "created_at": "={{$json.created_at}}"
+          },
+          "matchingColumns": ["invoice_id"]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "id": "slack-post-success",
+      "name": "Slack - Post Success",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [240, 140],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.SLACK_NOTIFY_CHANNEL_ID}}"
+        },
+        "text": "={{ '✅ 請求書ドラフトを作成しました\\n' + $json.invoice_id + ' | ' + $json.client_name + ' | ' + Number($json.amount).toLocaleString('ja-JP') + ' ' + $json.currency + ' | ' + $json.due_date + ' 期限' }}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Slack account (Bot Token)"
+        }
+      }
+    },
+    {
+      "id": "slack-post-error",
+      "name": "Slack - Post Error",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [240, 320],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{$env.SLACK_NOTIFY_CHANNEL_ID}}"
+        },
+        "text": "={{ '⚠️ 請求書ドラフトの作成に失敗しました\\nerror_type: sheets_append_failed\\ninvoice_id: ' + ($json.invoice_id || '(未生成)') + '\\n' + ($json.error?.message || JSON.stringify($json.error) || '不明なエラー') }}",
+        "otherOptions": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "REPLACE_WITH_CREDENTIAL_ID",
+          "name": "Slack account (Bot Token)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - Slash Command": {
+      "main": [
+        [{ "node": "Verify & Build Modal", "type": "main", "index": 0 }]
+      ]
+    },
+    "Verify & Build Modal": {
+      "main": [
+        [{ "node": "Open Modal (views.open)", "type": "main", "index": 0 }]
+      ]
+    },
+    "Open Modal (views.open)": {
+      "main": [
+        [{ "node": "Respond OK - Slash", "type": "main", "index": 0 }]
+      ]
+    },
+    "Webhook - Interactivity": {
+      "main": [
+        [{ "node": "Verify & Parse Payload", "type": "main", "index": 0 }]
+      ]
+    },
+    "Verify & Parse Payload": {
+      "main": [
+        [{ "node": "Validate & Build Invoice", "type": "main", "index": 0 }]
+      ]
+    },
+    "Validate & Build Invoice": {
+      "main": [
+        [{ "node": "IF - Is Valid", "type": "main", "index": 0 }]
+      ]
+    },
+    "IF - Is Valid": {
+      "main": [
+        [{ "node": "Respond OK - Interactivity", "type": "main", "index": 0 }],
+        [{ "node": "Respond Errors - Modal", "type": "main", "index": 0 }]
+      ]
+    },
+    "Respond OK - Interactivity": {
+      "main": [
+        [{ "node": "Google Sheets - Append Invoice", "type": "main", "index": 0 }]
+      ]
+    },
+    "Google Sheets - Append Invoice": {
+      "main": [
+        [{ "node": "Slack - Post Success", "type": "main", "index": 0 }],
+        [{ "node": "Slack - Post Error", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "templateId": "slack-invoice-create-draft-v1"
+  }
+}
