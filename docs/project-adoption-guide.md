@@ -34,6 +34,21 @@ jobs:
 `pull_request` や `branch` を許可する導入は、別の承認と案件側の branch protection
 を必須にします。`merge`、`deploy`、`admin`、`secret` は v1 で利用できません。
 
+## 独立クロスレビューと監視
+
+案件側では、PR作成者とは異なる GitHub ID の正式レビューを必須にします。加えて、
+次の READ-ONLY 監視ワークフローを呼び出します。
+
+```yaml
+  monitor:
+    uses: nario0715masa0619-create/luvira-ai-devflow/.github/workflows/luvira-independent-review-monitor.yml@main
+    with:
+      pull_request_number: 123
+```
+
+監視役はレビュー者ではなく、独立承認の有無を確認してActions実行記録に残す役割です。
+詳細は `independent-review-monitor-standard.md` を参照してください。
+
 ## 承認依頼の共通形式
 
 ```

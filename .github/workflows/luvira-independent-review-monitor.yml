@@ -1,0 +1,37 @@
+name: Luvira independent review monitor
+
+on:
+  workflow_call:
+    inputs:
+      pull_request_number:
+        description: Pull request number to observe.
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify independent review (read-only)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const number = ${{ inputs.pull_request_number }};
+            const { owner, repo } = context.repo;
+            const pull = await github.rest.pulls.get({ owner, repo, pull_number: number });
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner, repo, pull_number: number, per_page: 100
+            });
+            const latestByReviewer = new Map();
+            for (const review of reviews) latestByReviewer.set(review.user.login, review.state);
+            const independentApprovers = [...latestByReviewer.entries()]
+              .filter(([login, state]) => login !== pull.data.user.login && state === 'APPROVED')
+              .map(([login]) => login);
+            core.info(`MONITOR_RECORD pr=${number} author=${pull.data.user.login} independentApprovers=${independentApprovers.join(',') || 'none'}`);
+            if (independentApprovers.length === 0) {
+              core.setFailed('INDEPENDENT_REVIEW_BLOCKED: no current APPROVED review from an identity different from the PR author');
+            }
