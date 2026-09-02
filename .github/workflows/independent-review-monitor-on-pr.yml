@@ -1,0 +1,17 @@
+name: Independent review monitor
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  monitor:
+    uses: ./.github/workflows/luvira-independent-review-monitor.yml
+    with:
+      pull_request_number: ${{ github.event.pull_request.number }}
