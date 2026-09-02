@@ -61,6 +61,10 @@ Context Lock は、AI や自動化が作業を始める前に、**どの案件�
 含めます。GitHub の正式レビューが必要な案件では、それも別途保護ルールに従い
 ます。
 
+Context Lock の自己検証が成功しても、それだけでは変更を完了扱いにしません。
+独立クロスレビューと READ-ONLY 監視の要件は
+[`independent-review-monitor-standard.md`](independent-review-monitor-standard.md) を正とします。
+
 ## 例外と更新
 
 期限延長、許可範囲の拡張、対象リポジトリの変更は新しい承認記録を必要とします。
