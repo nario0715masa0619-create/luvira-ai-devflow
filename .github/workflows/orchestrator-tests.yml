@@ -1,0 +1,19 @@
+name: Orchestrator tests
+on:
+  pull_request:
+    paths: ["orchestrator/**"]
+  push:
+    branches: [main]
+    paths: ["orchestrator/**"]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -r orchestrator/requirements.txt
+      - run: PYTHONPATH=orchestrator python -m unittest discover -s orchestrator/tests
