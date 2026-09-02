@@ -18,4 +18,4 @@ jobs:
           service_account: devflow-deployer@luvira-ai-control-plane.iam.gserviceaccount.com
           audience: https://github.com/nario0715masa0619-create
       - uses: google-github-actions/setup-gcloud@v2
-      - run: gcloud run deploy luvira-devflow-orchestrator --source orchestrator --region us-central1 --no-allow-unauthenticated --service-account devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com
+      - run: gcloud run deploy luvira-devflow-orchestrator --source orchestrator --region us-central1 --no-allow-unauthenticated --quiet --service-account devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com
