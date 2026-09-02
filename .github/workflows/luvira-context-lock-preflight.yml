@@ -21,31 +21,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Validate Context Lock (read-only)
-        env:
-          LOCK_PATH: ${{ inputs.context_lock_path }}
-          REQUESTED_ACTION: ${{ inputs.requested_action }}
-          CALLER_REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
-          node <<'NODE'
-          const fs = require('fs');
-          const fail = (message) => { console.error(`CONTEXT_LOCK_BLOCKED: ${message}`); process.exit(1); };
-          const lockPath = process.env.LOCK_PATH;
-          let lock;
-          try { lock = JSON.parse(fs.readFileSync(lockPath, 'utf8')); }
-          catch { fail('missing or invalid JSON Context Lock'); }
-          const required = ['version', 'projectId', 'repository', 'issue', 'approvalUrl', 'expiresAt', 'allowedActions', 'protectedBranch'];
-          for (const key of required) if (!(key in lock)) fail(`missing field: ${key}`);
-          if (lock.version !== 1) fail('unsupported version');
-          if (!/^[a-z0-9][a-z0-9-]{1,62}$/.test(lock.projectId)) fail('invalid projectId');
-          if (lock.repository !== process.env.CALLER_REPOSITORY) fail('repository does not match caller');
-          if (!Number.isInteger(lock.issue) || lock.issue < 1) fail('invalid issue');
-          const expectedApprovalPrefix = `https://github.com/${lock.repository}/issues/${lock.issue}`;
-          if (!lock.approvalUrl.startsWith(expectedApprovalPrefix)) fail('approvalUrl does not bind to target issue');
-          if (!Array.isArray(lock.allowedActions) || !lock.allowedActions.includes(process.env.REQUESTED_ACTION)) fail('requested action is not allowed');
-          const neverAllowed = ['merge', 'deploy', 'admin', 'secret'];
-          if (neverAllowed.includes(process.env.REQUESTED_ACTION)) fail('requested action is prohibited by v1');
-          const expiry = Date.parse(lock.expiresAt);
-          if (Number.isNaN(expiry) || expiry <= Date.now()) fail('Context Lock is expired or invalid');
-          console.log(`CONTEXT_LOCK_PASS project=${lock.projectId} repository=${lock.repository} issue=${lock.issue} action=${process.env.REQUESTED_ACTION}`);
-          NODE
+          node scripts/validate-context-lock.js "${{ inputs.context_lock_path }}" "${{ inputs.requested_action }}" "${{ github.repository }}"

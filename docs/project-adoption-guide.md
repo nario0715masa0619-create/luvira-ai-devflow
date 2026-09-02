@@ -16,7 +16,7 @@
 
 ## 案件側に追加するもの
 
-1. `.github/luvira-context-lock.json` を作成する。
+1. `templates/context-lock.json` を元に `.github/luvira-context-lock.json` を作成する。
 2. `.github/workflows/luvira-preflight.yml` から共通ワークフローを呼び出す。
 3. 初回は `read` のみで実行結果を確認する。
 
@@ -44,3 +44,9 @@ jobs:
 ```
 
 承認後も、Context Lock の検証と案件側の保護ルールを通過しなければ作業は始まりません。
+
+## 共通基盤の自己検証
+
+共通リポジトリでは、正常な Lock、不一致リポジトリ、期限切れ、許可外アクション、
+禁止アクションを `node tests/validate-context-lock.test.js` で確認します。これにより
+案件を接続せずに fail-closed の動作を検証できます。

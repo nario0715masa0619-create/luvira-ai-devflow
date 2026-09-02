@@ -1,0 +1,61 @@
+name: AI work approval
+description: Context Lock を発行する前の、人間向け承認依頼
+title: "[AI Approval]: "
+labels: ["ai-approval"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        このIssueは AI 間の中継指示ではありません。人間が承認する内容を短く固定します。
+  - type: input
+    id: project_id
+    attributes:
+      label: Project ID
+      description: 組織内で一意の小文字・数字・ハイフンのID
+    validations:
+      required: true
+  - type: input
+    id: repository
+    attributes:
+      label: Repository
+      placeholder: owner/repository
+    validations:
+      required: true
+  - type: textarea
+    id: approve
+    attributes:
+      label: 承認すること
+      description: 一つの具体的な作業に限定する
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影響
+      description: 対象、権限、外部接続、コストを簡潔に記載する
+    validations:
+      required: true
+  - type: textarea
+    id: excluded
+    attributes:
+      label: しないこと
+      description: 今回許可しない操作を明記する
+    validations:
+      required: true
+  - type: dropdown
+    id: requested_action
+    attributes:
+      label: 許可を求める最初のアクション
+      options:
+        - read
+        - plan
+        - comment
+    validations:
+      required: true
+  - type: input
+    id: expiry
+    attributes:
+      label: 有効期限（UTC）
+      placeholder: 2026-12-31T00:00:00Z
+    validations:
+      required: true

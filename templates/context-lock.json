@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "projectId": "replace-with-unique-project-id",
+  "repository": "owner/repository",
+  "issue": 1,
+  "approvalUrl": "https://github.com/owner/repository/issues/1#issuecomment-1",
+  "expiresAt": "2026-12-31T00:00:00Z",
+  "allowedActions": ["read", "plan", "comment"],
+  "protectedBranch": "main"
+}
