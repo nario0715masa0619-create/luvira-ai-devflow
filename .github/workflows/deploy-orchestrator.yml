@@ -20,10 +20,17 @@ jobs:
       - uses: google-github-actions/setup-gcloud@v2
       - name: Build the container in the dedicated staging bucket
         run: |
-          gcloud builds submit orchestrator \
+          build_id="$(gcloud builds submit orchestrator \
             --tag us-central1-docker.pkg.dev/luvira-ai-control-plane/cloud-run-source-deploy/luvira-devflow-orchestrator:${GITHUB_SHA} \
             --gcs-source-staging-dir gs://luvira-devflow-source-660319628285/source \
-            --quiet
+            --async --quiet --format='value(id)')"
+          for attempt in $(seq 1 60); do
+            status="$(gcloud builds describe "$build_id" --format='value(status)')"
+            [ "$status" = "SUCCESS" ] && break
+            [ "$status" = "FAILURE" ] || [ "$status" = "CANCELLED" ] || [ "$status" = "EXPIRED" ] && exit 1
+            sleep 5
+          done
+          [ "$status" = "SUCCESS" ]
       - name: Deploy the reviewed container
         run: |
           gcloud run deploy luvira-devflow-orchestrator \
