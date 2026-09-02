@@ -1,32 +1,61 @@
 name: Luvira AI reviewer
 
 on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
   workflow_dispatch:
     inputs:
       pull_request_number:
-        description: Pull request number to validate the reviewer trust path for.
+        description: Pull request number to review.
         required: true
         type: number
 
 permissions:
   contents: read
   id-token: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
-  authenticate:
-    name: Verify OIDC reviewer identity
+  review:
+    name: Independent AI review
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
-    environment: ai-reviewer-custody
     steps:
       - name: Authenticate with GCP using OIDC
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github
           service_account: ai-reviewer-oidc@luvira-ai-control-plane.iam.gserviceaccount.com
-      - name: Record safe validation result
-        env:
-          PR_NUMBER: ${{ inputs.pull_request_number }}
+      - name: Load the GitHub App key without logging it
+        id: app-key
+        shell: bash
         run: |
-          echo "OIDC_REVIEWER_IDENTITY_PASS pr=${PR_NUMBER}"
-          echo "No secret was accessed and no review was submitted."
+          key_file="$RUNNER_TEMP/luvira-ai-reviewer.pem"
+          gcloud secrets versions access latest \
+            --secret github-app-luvirai-reviewer-private-key \
+            --project luvira-ai-control-plane > "$key_file"
+          echo "private-key<<EOF" >> "$GITHUB_OUTPUT"
+          cat "$key_file" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          rm -f "$key_file"
+      - name: Issue a short-lived GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: "4802527"
+          private-key: ${{ steps.app-key.outputs.private-key }}
+          owner: nario0715masa0619-create
+          repositories: luvira-ai-devflow
+      - name: Record bounded review request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request_number }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+            --jq '.number, .head.sha, .base.ref' > /dev/null
+          echo "AI_REVIEW_READY pr=${PR_NUMBER}"
+          echo "The App token is repository-scoped and expires automatically."
