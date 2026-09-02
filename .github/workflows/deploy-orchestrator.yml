@@ -18,4 +18,15 @@ jobs:
           service_account: devflow-deployer@luvira-ai-control-plane.iam.gserviceaccount.com
           audience: https://github.com/nario0715masa0619-create
       - uses: google-github-actions/setup-gcloud@v2
-      - run: gcloud run deploy luvira-devflow-orchestrator --source orchestrator --gcs-source-staging-dir gs://luvira-devflow-source-660319628285/source --region us-central1 --no-allow-unauthenticated --quiet --service-account devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com
+      - name: Build the container in the dedicated staging bucket
+        run: |
+          gcloud builds submit orchestrator \
+            --tag us-central1-docker.pkg.dev/luvira-ai-control-plane/cloud-run-source-deploy/luvira-devflow-orchestrator:${GITHUB_SHA} \
+            --gcs-source-staging-dir gs://luvira-devflow-source-660319628285/source \
+            --quiet
+      - name: Deploy the reviewed container
+        run: |
+          gcloud run deploy luvira-devflow-orchestrator \
+            --image us-central1-docker.pkg.dev/luvira-ai-control-plane/cloud-run-source-deploy/luvira-devflow-orchestrator:${GITHUB_SHA} \
+            --region us-central1 --no-allow-unauthenticated --quiet \
+            --service-account devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com
