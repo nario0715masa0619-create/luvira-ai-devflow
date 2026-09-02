@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 
+// This validator is intentionally dependency-free so every PR can test it.
 const prohibitedActions = new Set(['merge', 'deploy', 'admin', 'secret']);
 
 function validateContextLock(lock, { repository, requestedAction, now = Date.now() }) {

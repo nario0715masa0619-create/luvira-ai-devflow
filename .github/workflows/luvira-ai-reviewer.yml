@@ -1,0 +1,32 @@
+name: Luvira AI reviewer
+
+on:
+  workflow_dispatch:
+    inputs:
+      pull_request_number:
+        description: Pull request number to validate the reviewer trust path for.
+        required: true
+        type: number
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: read
+
+jobs:
+  authenticate:
+    name: Verify OIDC reviewer identity
+    runs-on: ubuntu-latest
+    environment: ai-reviewer-custody
+    steps:
+      - name: Authenticate with GCP using OIDC
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github
+          service_account: ai-reviewer-oidc@luvira-ai-control-plane.iam.gserviceaccount.com
+      - name: Record safe validation result
+        env:
+          PR_NUMBER: ${{ inputs.pull_request_number }}
+        run: |
+          echo "OIDC_REVIEWER_IDENTITY_PASS pr=${PR_NUMBER}"
+          echo "No secret was accessed and no review was submitted."

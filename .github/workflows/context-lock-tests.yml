@@ -2,16 +2,8 @@ name: Context Lock tests
 
 on:
   pull_request:
-    paths:
-      - '.github/workflows/luvira-context-lock-preflight.yml'
-      - 'scripts/validate-context-lock.js'
-      - 'tests/validate-context-lock.test.js'
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/luvira-context-lock-preflight.yml'
-      - 'scripts/validate-context-lock.js'
-      - 'tests/validate-context-lock.test.js'
 
 permissions:
   contents: read

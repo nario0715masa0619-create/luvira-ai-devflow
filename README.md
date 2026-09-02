@@ -68,6 +68,10 @@ AIには役割を分担させ、同じ仕事を複数のAIに重複してやら�
 AI間の手動コピペを不要にする、案件・リポジトリ・Issue・許可範囲の共通安全契約
 `docs/project-adoption-guide.md`
 個別案件が共通安全ゲートを明示的に採用するための最小手順
+`docs/independent-ai-reviewer-identity-standard.md`
+独立AIクロスレビューIDを、鍵の所在確認・最小権限・監視を満たして導入するための標準
+`docs/ai-reviewer-custody-runbook.md`
+AIレビューIDの鍵を露出させず、保管・照合・失効するための運用標準
 `docs/slack-invoice-create-draft-v1-README.md`
 Slack請求書ドラフト作成のn8nワークフロー(v1)についてはこちらを参照
 ---
