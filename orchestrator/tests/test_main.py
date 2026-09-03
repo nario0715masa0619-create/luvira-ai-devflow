@@ -1,7 +1,11 @@
 import base64
+import hashlib
+import hmac
 import json
+import os
 import unittest
 
+os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
 from main import app
 
 
@@ -21,3 +25,15 @@ class EventTest(unittest.TestCase):
     def test_blocks_other_repository(self):
         response = self.client.post("/events", json=event({"repository": "other/repository", "action": "opened", "issue": 1}))
         self.assertEqual(response.status_code, 403)
+
+    def test_accepts_signed_github_issue(self):
+        payload = {"action": "opened", "repository": {"full_name": "nario0715masa0619-create/luvira-ai-devflow"}, "issue": {"number": 26}}
+        raw = json.dumps(payload).encode()
+        signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
+        response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "PENDING_CONTEXT_LOCK")
+
+    def test_blocks_unsigned_github_issue(self):
+        response = self.client.post("/github/webhook", json={"action": "opened"}, headers={"X-GitHub-Event": "issues"})
+        self.assertEqual(response.status_code, 401)
