@@ -105,4 +105,10 @@ def pending_context_lock(repository, issue, action):
             "reviewer_runtime_monitor",
             "merge_protection",
         ],
+        monitoring_layers={
+            "execution": "runner availability, quotas, timeout, fallback count",
+            "quality": "tests, static analysis, dependency and secret scanning",
+            "independence": "reviewer identity and runtime separation",
+            "governance": "context lock, policy, credentials and audit integrity",
+        },
     )
