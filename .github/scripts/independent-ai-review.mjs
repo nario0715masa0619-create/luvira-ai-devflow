@@ -42,7 +42,9 @@ async function vertexReview(pull, diff) {
   const response = await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: instruction }] }], generationConfig: { temperature: 0, maxOutputTokens: 1200, responseMimeType: 'application/json' } }) });
   if (!response.ok) throw new Error(`REVIEW_BLOCKED: Vertex AI failed (${response.status})`);
   const text = (await response.json()).candidates?.[0]?.content?.parts?.map((part) => part.text ?? '').join('') ?? '';
-  let result; try { result = JSON.parse(text); } catch { throw new Error('REVIEW_BLOCKED: invalid AI response'); }
+  // Models may wrap an otherwise valid object in Markdown despite responseMimeType.
+  const json = text.match(/\{[\s\S]*\}/)?.[0];
+  let result; try { result = JSON.parse(json); } catch { throw new Error('REVIEW_BLOCKED: invalid AI response'); }
   if (!['APPROVE', 'REQUEST_CHANGES'].includes(result.decision) || typeof result.summary !== 'string' || !Array.isArray(result.findings)) throw new Error('REVIEW_BLOCKED: invalid AI schema');
   return result;
 }
