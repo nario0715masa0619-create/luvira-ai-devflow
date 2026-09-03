@@ -1,12 +1,14 @@
 {
   "$schema": "https://luvira.example/schemas/runner-routing-policy-v1.json",
   "version": 1,
-  "execution_order": ["copilot", "codex", "claude-code"],
+  "execution_order": ["kimi", "qwen", "copilot", "codex", "claude-code"],
   "fallback_on": ["provider_unavailable", "rate_limit", "timeout", "transient_failure"],
   "never_fallback_on": ["context_lock_failure", "test_failure", "security_finding", "policy_violation"],
   "quality": {
     "require_deterministic_tests": true,
-    "require_independent_reviewer": true,
+    "required_reviewers": ["codex", "claude-code"],
+    "require_all_reviewers_to_approve": true,
+    "reject_implementer_as_reviewer": true,
     "reject_same_provider_reviewer": true,
     "require_runtime_monitor": true,
     "require_merge_protection": true

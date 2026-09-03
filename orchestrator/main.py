@@ -11,10 +11,10 @@ EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-c
 WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 RUNNER_ORDER = tuple(
     provider.strip()
-    for provider in os.environ.get("RUNNER_ORDER", "copilot,codex,claude-code").split(",")
+    for provider in os.environ.get("RUNNER_ORDER", "kimi,qwen,copilot,codex,claude-code").split(",")
     if provider.strip()
 )
-ALLOWED_RUNNERS = frozenset({"copilot", "codex", "claude-code"})
+ALLOWED_RUNNERS = frozenset({"kimi", "qwen", "copilot", "codex", "claude-code"})
 
 
 @app.post("/events")
@@ -101,7 +101,8 @@ def pending_context_lock(repository, issue, action):
         quality_gates=[
             "context_lock",
             "deterministic_tests",
-            "independent_ai_review",
+            "codex_independent_review",
+            "claude_code_independent_review",
             "reviewer_runtime_monitor",
             "merge_protection",
         ],

@@ -21,9 +21,10 @@ class EventTest(unittest.TestCase):
         response = self.client.post("/events", json=event({"repository": "nario0715masa0619-create/luvira-ai-devflow", "action": "opened", "issue": 1}))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "PENDING_CONTEXT_LOCK")
-        self.assertEqual(response.json["execution"]["primary"], "copilot")
-        self.assertEqual(response.json["execution"]["fallbacks"], ["codex", "claude-code"])
-        self.assertIn("independent_ai_review", response.json["quality_gates"])
+        self.assertEqual(response.json["execution"]["primary"], "kimi")
+        self.assertEqual(response.json["execution"]["fallbacks"], ["qwen", "copilot", "codex", "claude-code"])
+        self.assertIn("codex_independent_review", response.json["quality_gates"])
+        self.assertIn("claude_code_independent_review", response.json["quality_gates"])
         self.assertEqual(response.json["monitoring_layers"]["governance"], "context lock, policy, credentials and audit integrity")
 
     def test_blocks_when_runner_order_has_no_supported_runner(self):
