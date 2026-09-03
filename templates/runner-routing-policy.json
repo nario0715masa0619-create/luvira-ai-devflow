@@ -9,8 +9,14 @@
       "examples_not_allowlist": ["kimi", "qwen", "glm", "minimax", "deepseek"],
       "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed"]
     },
+    "implementation_standard": {
+      "selection": "only_after_low_cost_task_failure_or_unavailability",
+      "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed", "cost_within_project_budget"]
+    },
     "implementation_high_assurance": {
-      "selection": "highest_recent_evaluation_score",
+      "selection": "disabled_by_default",
+      "enable_only_after": ["two_distinct_lower_tier_failures", "cost_within_project_budget", "context_lock_allows_premium_model"],
+      "examples": ["kimi-k3", "grok-4.6"],
       "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed", "security_task_evaluation_passed"]
     }
   },
@@ -34,6 +40,7 @@
   "limits": {
     "max_attempts_per_issue": 3,
     "max_fallbacks_per_issue": 2,
-    "cooldown_minutes_after_provider_failure": 30
+    "cooldown_minutes_after_provider_failure": 30,
+    "reserve_percent_for_standard_or_premium_escalation": 20
   }
 }
