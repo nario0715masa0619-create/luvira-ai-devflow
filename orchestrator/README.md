@@ -5,9 +5,10 @@ Cloud Run上でGitHubイベントを受け、対象リポジトリとIssueをfai
 ## 実行契約
 
 1. GitHubイベントはPub/Sub形式で `/events` へ届く。
-2. `repository` が共通基盤の許可値と一致しなければ拒否する。
-3. Issue番号と許可済みイベントだけを Context Lock 検証待ちにする。
-4. Context Lock、独立AIレビュー、監視、保護ルールを満たすまで、コード変更・マージ・デプロイへ進まない。
+2. GitHub App/Webhookイベントは `/github/webhook` へ届く。公開入口は署名検証を必須とし、署名不一致・未設定時はfail-closedで拒否する。
+3. `repository` が共通基盤の許可値と一致しなければ拒否する。
+4. Issue番号と許可済みイベントだけを Context Lock 検証待ちにする。
+5. Context Lock、独立AIレビュー、監視、保護ルールを満たすまで、コード変更・マージ・デプロイへ進まない。
 
 ## 権限分離
 
