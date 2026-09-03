@@ -37,3 +37,10 @@ class EventTest(unittest.TestCase):
     def test_blocks_unsigned_github_issue(self):
         response = self.client.post("/github/webhook", json={"action": "opened"}, headers={"X-GitHub-Event": "issues"})
         self.assertEqual(response.status_code, 401)
+
+    def test_accepts_signed_github_ping_without_orchestrating(self):
+        raw = json.dumps({"zen": "Keep it logically awesome."}).encode()
+        signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
+        response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-GitHub-Event": "ping", "X-Hub-Signature-256": signature})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "OK", "event": "ping"})
