@@ -19,7 +19,14 @@
   "quality": {
     "require_deterministic_tests": true,
     "required_reviewers": ["codex", "claude-code"],
+    "reviewer_matrix": {
+      "opencode-go": ["codex", "claude-code"],
+      "copilot": ["codex", "claude-code"],
+      "codex": ["claude-code", "copilot"],
+      "claude-code": ["codex", "copilot"]
+    },
     "require_all_reviewers_to_approve": true,
+    "copilot_review_mode": "automatic_on_every_push_required_check",
     "reject_implementer_as_reviewer": true,
     "reject_same_provider_reviewer": true,
     "require_runtime_monitor": true,

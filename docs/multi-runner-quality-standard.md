@@ -46,11 +46,16 @@ CodexまたはClaude Codeが実装者になった場合、そのAIは同じPRの
 | 実装者 | 必須レビュー |
 | --- | --- |
 | OpenCode Go低コストモデル | Codex と Claude Code |
-| Codex | Claude Code と 第三の独立レビュー実行環境 |
-| Claude Code | Codex と 第三の独立レビュー実行環境 |
+| Codex | Claude Code と Copilot |
+| Claude Code | Codex と Copilot |
 
-第三の独立レビュー実行環境は、実装者・Codex・Claude Codeと異なる提供元、認証ID、実行環境を
-満たすことが必要である。設定がなければ、Codex／Claude Codeへの自動退避は許可しない。
+Copilotは実装者・Codex・Claude Codeとは異なる提供元、認証ID、実行環境で動かす。設定が
+なければ、Codex／Claude Codeへの自動退避は許可しない。
+
+GitHub Copilotの標準コードレビューは通常 `COMMENT` であり、GitHubの必須承認数にそのまま
+数えられない。そのためLuviraでは、全pushでCopilotレビューを自動要求し、Copilotレビューが
+未実行・重大/高重要度指摘あり・判定不能なら失敗する**必須チェック**として扱う。Copilotの
+コメントだけを理由に自動マージすることはない。
 
 ## Codex・Claude Codeの二重品質レビュー
 
