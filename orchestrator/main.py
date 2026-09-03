@@ -9,6 +9,12 @@ from flask import Flask, jsonify, request
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
 WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
+RUNNER_ORDER = tuple(
+    provider.strip()
+    for provider in os.environ.get("RUNNER_ORDER", "opencode-go,codex,claude-code,copilot").split(",")
+    if provider.strip()
+)
+ALLOWED_RUNNERS = frozenset({"opencode-go", "copilot", "codex", "claude-code"})
 
 
 @app.post("/events")
@@ -31,8 +37,7 @@ def events():
     if action not in {"opened", "labeled", "edited"} or not isinstance(issue, int):
         return jsonify(status="BLOCKED", reason="unsupported_event"), 400
 
-    logging.info("CONTEXT_LOCK_PENDING repository=%s issue=%s action=%s", repository, issue, action)
-    return jsonify(status="PENDING_CONTEXT_LOCK", repository=repository, issue=issue)
+    return pending_context_lock(repository, issue, action)
 
 
 @app.post("/github/webhook")
@@ -68,10 +73,43 @@ def github_webhook():
     if action not in {"opened", "labeled", "edited"} or not isinstance(issue, int):
         return jsonify(status="BLOCKED", reason="unsupported_event"), 400
 
-    logging.info("CONTEXT_LOCK_PENDING repository=%s issue=%s action=%s", repository, issue, action)
-    return jsonify(status="PENDING_CONTEXT_LOCK", repository=repository, issue=issue)
+    return pending_context_lock(repository, issue, action)
 
 
 @app.get("/healthz")
 def healthz():
     return jsonify(status="ok")
+
+
+def pending_context_lock(repository, issue, action):
+    """Return a fail-closed routing plan; this endpoint never runs an AI itself."""
+    valid_order = [runner for runner in RUNNER_ORDER if runner in ALLOWED_RUNNERS]
+    if not valid_order:
+        logging.error("BLOCKED no valid execution runner is configured")
+        return jsonify(status="BLOCKED", reason="no_valid_runner"), 503
+
+    primary, *fallbacks = valid_order
+    logging.info(
+        "CONTEXT_LOCK_PENDING repository=%s issue=%s action=%s primary=%s fallbacks=%s",
+        repository, issue, action, primary, ",".join(fallbacks) or "none",
+    )
+    return jsonify(
+        status="PENDING_CONTEXT_LOCK",
+        repository=repository,
+        issue=issue,
+        execution={"primary": primary, "fallbacks": fallbacks},
+        quality_gates=[
+            "context_lock",
+            "deterministic_tests",
+            "codex_independent_review",
+            "claude_code_independent_review",
+            "reviewer_runtime_monitor",
+            "merge_protection",
+        ],
+        monitoring_layers={
+            "execution": "runner availability, quotas, timeout, fallback count",
+            "quality": "tests, static analysis, dependency and secret scanning",
+            "independence": "reviewer identity and runtime separation",
+            "governance": "context lock, policy, credentials and audit integrity",
+        },
+    )

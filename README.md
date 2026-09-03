@@ -72,6 +72,8 @@ AI間の手動コピペを不要にする、案件・リポジトリ・Issue・�
 個別案件が共通安全ゲートを明示的に採用するための最小手順
 `docs/independent-ai-reviewer-identity-standard.md`
 独立AIクロスレビューIDを、鍵の所在確認・最小権限・監視を満たして導入するための標準
+`docs/multi-runner-quality-standard.md`
+Copilot・Codex・Claude Codeを安全に切り替え、独立品質ゲートと監視を常時適用する標準
 `docs/ai-reviewer-custody-runbook.md`
 AIレビューIDの鍵を露出させず、保管・照合・失効するための運用標準
 `docs/slack-invoice-create-draft-v1-README.md`

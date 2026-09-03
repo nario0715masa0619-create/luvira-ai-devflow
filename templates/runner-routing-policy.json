@@ -1,0 +1,46 @@
+{
+  "$schema": "https://luvira.example/schemas/runner-routing-policy-v1.json",
+  "version": 1,
+  "execution_order": ["opencode-go", "codex", "claude-code", "copilot"],
+  "model_pools": {
+    "implementation_low_cost": {
+      "provider": "opencode-go",
+      "selection": "capability_score_then_cost_then_availability",
+      "examples_not_allowlist": ["kimi", "qwen", "glm", "minimax", "deepseek"],
+      "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed"]
+    },
+    "premium_models": {
+      "selection": "disabled",
+      "reason": "move to an independent provider runner instead of consuming shared OpenCode Go budget with premium models"
+    }
+  },
+  "fallback_on": ["provider_unavailable", "rate_limit", "timeout", "transient_failure", "low_cost_model_capability_failure"],
+  "never_fallback_on": ["context_lock_failure", "test_failure", "security_finding", "policy_violation"],
+  "quality": {
+    "require_deterministic_tests": true,
+    "required_reviewers": ["codex", "claude-code"],
+    "reviewer_matrix": {
+      "opencode-go": ["codex", "claude-code"],
+      "copilot": ["codex", "claude-code"],
+      "codex": ["claude-code", "copilot"],
+      "claude-code": ["codex", "copilot"]
+    },
+    "require_all_reviewers_to_approve": true,
+    "copilot_review_mode": "automatic_on_every_push_required_check",
+    "reject_implementer_as_reviewer": true,
+    "reject_same_provider_reviewer": true,
+    "require_runtime_monitor": true,
+    "require_merge_protection": true
+  },
+  "monitoring_layers": {
+    "execution": {"write_access": false, "responsibility": "availability, quota, timeout, fallback"},
+    "quality": {"write_access": false, "responsibility": "tests, static analysis, dependencies, secrets"},
+    "independence": {"write_access": false, "responsibility": "reviewer and runtime separation"},
+    "governance": {"write_access": false, "responsibility": "context lock, policy, credential and audit integrity"}
+  },
+  "limits": {
+    "max_attempts_per_issue": 3,
+    "max_fallbacks_per_issue": 2,
+    "cooldown_minutes_after_provider_failure": 30
+  }
+}
