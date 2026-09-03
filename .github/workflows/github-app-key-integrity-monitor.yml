@@ -19,14 +19,18 @@ jobs:
         with:
           ref: main
           persist-credentials: false
-      - uses: google-github-actions/auth@v2
+      - id: auth
+        continue-on-error: true
+        uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github
-          service_account: ai-reviewer-oidc@luvira-ai-control-plane.iam.gserviceaccount.com
-      - uses: google-github-actions/setup-gcloud@v2
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-app-key-monitor
+          service_account: github-app-key-monitor@luvira-ai-control-plane.iam.gserviceaccount.com
+      - if: steps.auth.outcome == 'success'
+        uses: google-github-actions/setup-gcloud@v2
       - name: Verify registration, proof, and active promotion state
         id: integrity
         continue-on-error: true
+        if: steps.auth.outcome == 'success'
         env:
           GITHUB_APP_ID: '4802527'
         run: |
@@ -37,7 +41,7 @@ jobs:
             --project luvira-ai-control-plane > "$key_file"
           node .github/scripts/verify-github-app-key.mjs "$key_file"
       - name: Block and open an incident on integrity failure
-        if: steps.integrity.outcome != 'success'
+        if: always() && (steps.auth.outcome != 'success' || steps.integrity.outcome != 'success')
         uses: actions/github-script@v7
         with:
           script: |
