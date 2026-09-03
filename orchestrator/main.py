@@ -49,7 +49,14 @@ def github_webhook():
         logging.warning("BLOCKED invalid GitHub webhook signature")
         return jsonify(status="BLOCKED", reason="invalid_signature"), 401
 
-    if request.headers.get("X-GitHub-Event") != "issues":
+    event_name = request.headers.get("X-GitHub-Event")
+    # GitHub sends a signed ping whenever a webhook is first configured.  It is
+    # a transport handshake, not an orchestration request, so acknowledge it
+    # without accepting any repository or issue data.
+    if event_name == "ping":
+        return jsonify(status="OK", event="ping"), 200
+
+    if event_name != "issues":
         return jsonify(status="BLOCKED", reason="unsupported_event"), 400
     payload = request.get_json(silent=True) or {}
     repository = (payload.get("repository") or {}).get("full_name")
