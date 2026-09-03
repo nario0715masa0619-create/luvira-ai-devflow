@@ -3,6 +3,8 @@ import hmac
 import json
 import logging
 import os
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from flask import Flask, jsonify, request
 
@@ -15,6 +17,7 @@ RUNNER_ORDER = tuple(
     if provider.strip()
 )
 ALLOWED_RUNNERS = frozenset({"opencode-go", "copilot", "codex", "claude-code"})
+OPENCODE_GO_MODELS_URL = "https://opencode.ai/zen/go/v1/models"
 
 
 @app.post("/events")
@@ -81,6 +84,24 @@ def healthz():
     return jsonify(status="ok")
 
 
+@app.get("/readiness/opencode-go")
+def opencode_go_readiness():
+    """Prove the runtime can reach OpenCode Go without exposing the key or sending prompts."""
+    api_key = os.environ.get("OPENCODE_GO_API_KEY", "")
+    if not api_key:
+        logging.error("OPENCODE_GO_BLOCKED credential is not configured")
+        return jsonify(status="BLOCKED", reason="opencode_go_not_configured"), 503
+
+    try:
+        model_count = opencode_go_model_count(api_key)
+    except (HTTPError, URLError, TimeoutError, ValueError):
+        logging.warning("OPENCODE_GO_BLOCKED readiness check failed")
+        return jsonify(status="BLOCKED", reason="opencode_go_unavailable"), 503
+
+    logging.info("OPENCODE_GO_READY model_count=%s", model_count)
+    return jsonify(status="READY", provider="opencode-go", model_count=model_count)
+
+
 def pending_context_lock(repository, issue, action):
     """Return a fail-closed routing plan; this endpoint never runs an AI itself."""
     valid_order = [runner for runner in RUNNER_ORDER if runner in ALLOWED_RUNNERS]
@@ -113,3 +134,17 @@ def pending_context_lock(repository, issue, action):
             "governance": "context lock, policy, credentials and audit integrity",
         },
     )
+
+
+def opencode_go_model_count(api_key):
+    """Return only a count, keeping provider data and credentials out of responses/logs."""
+    request = Request(
+        OPENCODE_GO_MODELS_URL,
+        headers={"Authorization": f"Bearer {api_key}", "User-Agent": "luvira-devflow-readiness/1"},
+    )
+    with urlopen(request, timeout=10) as response:  # nosec B310: fixed HTTPS endpoint
+        payload = json.loads(response.read().decode())
+    models = payload.get("data")
+    if not isinstance(models, list):
+        raise ValueError("invalid OpenCode Go model response")
+    return len(models)

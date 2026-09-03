@@ -4,6 +4,7 @@ import hmac
 import json
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
 from main import app
@@ -38,6 +39,20 @@ class EventTest(unittest.TestCase):
             self.assertEqual(response.json["reason"], "no_valid_runner")
         finally:
             main.RUNNER_ORDER = old_order
+
+    def test_opencode_go_readiness_returns_model_count_only(self):
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": "test-key"}):
+            with patch("main.opencode_go_model_count", return_value=23) as model_count:
+                response = self.client.get("/readiness/opencode-go")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "READY", "provider": "opencode-go", "model_count": 23})
+        model_count.assert_called_once_with("test-key")
+
+    def test_opencode_go_readiness_blocks_without_key(self):
+        with patch.dict(os.environ, {"OPENCODE_GO_API_KEY": ""}):
+            response = self.client.get("/readiness/opencode-go")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json["reason"], "opencode_go_not_configured")
 
     def test_blocks_other_repository(self):
         response = self.client.post("/events", json=event({"repository": "other/repository", "action": "opened", "issue": 1}))
