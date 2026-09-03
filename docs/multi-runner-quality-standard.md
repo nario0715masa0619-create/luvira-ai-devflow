@@ -7,15 +7,19 @@ ChatGPT、Copilot、Codex、Claude Codeなど、特定のAIの利用上限・障
 
 ## 実行AIの扱い
 
-Kimi/Qwenは低コストの**実装ワーカー**、CodexとClaude Codeは独立した**品質レビュー
-ワーカー**として扱う。実装順は案件の `runner-routing-policy.json` で固定し、標準順は
-次とする。
+OpenCode Goで利用できるKimi/Qwen等は低コスト実装候補の**例**であり、固定の担当者
+ではない。CodexとClaude Codeは独立した**品質レビュー ワーカー**として扱う。実装AIは
+案件の `runner-routing-policy.json` に定義したモデルプールから選び、標準の退避順は次とする。
 
-1. Kimi
-2. Qwen
-3. Copilot（必要時の実装退避先）
-4. Codex（実装退避先として使う場合も、レビュー役とは別実行IDにする）
-5. Claude Code（同上）
+1. OpenCode Go の承認済み低コストモデルプール
+2. Copilot（必要時の実装退避先）
+3. Codex（実装退避先として使う場合も、レビュー役とは別実行IDにする）
+4. Claude Code（同上）
+
+モデルプールは、実タスク評価の品質、構造化出力、サンドボックス適合性、可用性、単価の
+順に選定する。Kimi、Qwen、GLM、MiniMax、DeepSeek等は候補になり得るが、名前や価格だけで
+採用しない。案件・言語・変更リスクごとに継続評価し、基準を満たさないモデルはプールから
+自動除外する。
 
 退避できるのは `provider_unavailable`、利用上限、タイムアウト、一時障害だけである。
 Context Lock不一致、テスト失敗、セキュリティ指摘、ポリシー違反では退避せず停止する。
@@ -26,13 +30,13 @@ Context Lock不一致、テスト失敗、セキュリティ指摘、ポリシ�
 
 ## Codex・Claude Codeの二重品質レビュー
 
-Kimi/Qwenが作成したPRは、CodexとClaude Codeの**両方**が独立に `APPROVE` するまで
+低コストモデルプールが作成したPRは、CodexとClaude Codeの**両方**が独立に `APPROVE` するまで
 合格としない。片方でも `REQUEST_CHANGES`、実行失敗、タイムアウト、判定不能なら
 fail-closedで停止する。多数決・片方の代替・レビュー省略は禁止する。
 
 | 役割 | 担当 | 禁止事項 |
 | --- | --- | --- |
-| 実装 | Kimi または Qwen | 自己レビュー、PR承認、マージ、品質ゲート変更 |
+| 実装 | 承認済みモデルプールから選ばれたAI | 自己レビュー、PR承認、マージ、品質ゲート変更 |
 | 第1レビュー | Codex | 実装、自己の判定を根拠にしたマージ |
 | 第2レビュー | Claude Code | 実装、自己の判定を根拠にしたマージ |
 | 最終ゲート | GitHub保護ルール | 片方だけの承認でマージ |

@@ -1,7 +1,19 @@
 {
   "$schema": "https://luvira.example/schemas/runner-routing-policy-v1.json",
   "version": 1,
-  "execution_order": ["kimi", "qwen", "copilot", "codex", "claude-code"],
+  "execution_order": ["opencode-go", "copilot", "codex", "claude-code"],
+  "model_pools": {
+    "implementation_low_cost": {
+      "provider": "opencode-go",
+      "selection": "capability_score_then_cost_then_availability",
+      "examples_not_allowlist": ["kimi", "qwen", "glm", "minimax", "deepseek"],
+      "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed"]
+    },
+    "implementation_high_assurance": {
+      "selection": "highest_recent_evaluation_score",
+      "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed", "security_task_evaluation_passed"]
+    }
+  },
   "fallback_on": ["provider_unavailable", "rate_limit", "timeout", "transient_failure"],
   "never_fallback_on": ["context_lock_failure", "test_failure", "security_finding", "policy_violation"],
   "quality": {
