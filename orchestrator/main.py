@@ -11,7 +11,7 @@ EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-c
 WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 RUNNER_ORDER = tuple(
     provider.strip()
-    for provider in os.environ.get("RUNNER_ORDER", "opencode-go,copilot,codex,claude-code").split(",")
+    for provider in os.environ.get("RUNNER_ORDER", "opencode-go,codex,claude-code,copilot").split(",")
     if provider.strip()
 )
 ALLOWED_RUNNERS = frozenset({"opencode-go", "copilot", "codex", "claude-code"})

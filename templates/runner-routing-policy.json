@@ -1,7 +1,7 @@
 {
   "$schema": "https://luvira.example/schemas/runner-routing-policy-v1.json",
   "version": 1,
-  "execution_order": ["opencode-go", "copilot", "codex", "claude-code"],
+  "execution_order": ["opencode-go", "codex", "claude-code", "copilot"],
   "model_pools": {
     "implementation_low_cost": {
       "provider": "opencode-go",
@@ -9,18 +9,12 @@
       "examples_not_allowlist": ["kimi", "qwen", "glm", "minimax", "deepseek"],
       "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed"]
     },
-    "implementation_standard": {
-      "selection": "only_after_low_cost_task_failure_or_unavailability",
-      "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed", "cost_within_project_budget"]
-    },
-    "implementation_high_assurance": {
-      "selection": "disabled_by_default",
-      "enable_only_after": ["two_distinct_lower_tier_failures", "cost_within_project_budget", "context_lock_allows_premium_model"],
-      "examples": ["kimi-k3", "grok-4.6"],
-      "minimum_criteria": ["sandbox_compatible", "structured_output", "repository_task_evaluation_passed", "security_task_evaluation_passed"]
+    "premium_models": {
+      "selection": "disabled",
+      "reason": "move to an independent provider runner instead of consuming shared OpenCode Go budget with premium models"
     }
   },
-  "fallback_on": ["provider_unavailable", "rate_limit", "timeout", "transient_failure"],
+  "fallback_on": ["provider_unavailable", "rate_limit", "timeout", "transient_failure", "low_cost_model_capability_failure"],
   "never_fallback_on": ["context_lock_failure", "test_failure", "security_finding", "policy_violation"],
   "quality": {
     "require_deterministic_tests": true,
@@ -40,7 +34,6 @@
   "limits": {
     "max_attempts_per_issue": 3,
     "max_fallbacks_per_issue": 2,
-    "cooldown_minutes_after_provider_failure": 30,
-    "reserve_percent_for_standard_or_premium_escalation": 20
+    "cooldown_minutes_after_provider_failure": 30
   }
 }
