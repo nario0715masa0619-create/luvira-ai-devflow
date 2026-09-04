@@ -3,9 +3,11 @@ import hmac
 import json
 import logging
 import os
+import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+import jwt
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
@@ -18,6 +20,7 @@ RUNNER_ORDER = tuple(
 )
 ALLOWED_RUNNERS = frozenset({"opencode-go", "copilot", "codex", "claude-code"})
 OPENCODE_GO_MODELS_URL = "https://opencode.ai/zen/go/v1/models"
+GITHUB_API_URL = "https://api.github.com"
 
 
 @app.post("/events")
@@ -102,6 +105,31 @@ def opencode_go_readiness():
     return jsonify(status="READY", provider="opencode-go", model_count=model_count)
 
 
+@app.get("/readiness/github-worker")
+def github_worker_readiness():
+    """Verify the Worker App identity without creating a token, branch, or PR."""
+    app_id = os.environ.get("GITHUB_WORKER_APP_ID", "")
+    installation_id = os.environ.get("GITHUB_WORKER_INSTALLATION_ID", "")
+    private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
+    if not app_id or not installation_id or not private_key:
+        logging.error("GITHUB_WORKER_BLOCKED credential or installation is not configured")
+        return jsonify(status="BLOCKED", reason="github_worker_not_configured"), 503
+
+    try:
+        installation = github_worker_installation(app_id, installation_id, private_key)
+    except (HTTPError, URLError, TimeoutError, ValueError, jwt.PyJWTError):
+        logging.warning("GITHUB_WORKER_BLOCKED identity verification failed")
+        return jsonify(status="BLOCKED", reason="github_worker_unavailable"), 503
+
+    account = (installation.get("account") or {}).get("login")
+    if installation.get("id") != int(installation_id) or not isinstance(account, str):
+        logging.warning("GITHUB_WORKER_BLOCKED installation identity mismatch")
+        return jsonify(status="BLOCKED", reason="github_worker_identity_mismatch"), 503
+
+    logging.info("GITHUB_WORKER_READY installation_id=%s account=%s", installation_id, account)
+    return jsonify(status="READY", provider="github-worker", installation_id=int(installation_id), account=account)
+
+
 def pending_context_lock(repository, issue, action):
     """Return a fail-closed routing plan; this endpoint never runs an AI itself."""
     valid_order = [runner for runner in RUNNER_ORDER if runner in ALLOWED_RUNNERS]
@@ -148,3 +176,23 @@ def opencode_go_model_count(api_key):
     if not isinstance(models, list):
         raise ValueError("invalid OpenCode Go model response")
     return len(models)
+
+
+def github_worker_installation(app_id, installation_id, private_key):
+    """Read the configured installation using an App JWT; never mint an installation token."""
+    now = int(time.time())
+    app_jwt = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": app_id}, private_key, algorithm="RS256")
+    request = Request(
+        f"{GITHUB_API_URL}/app/installations/{installation_id}",
+        headers={
+            "Authorization": f"Bearer {app_jwt}",
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "luvira-devflow-worker-readiness/1",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    with urlopen(request, timeout=10) as response:  # nosec B310: fixed GitHub HTTPS endpoint
+        payload = json.loads(response.read().decode())
+    if not isinstance(payload, dict):
+        raise ValueError("invalid GitHub installation response")
+    return payload
