@@ -29,7 +29,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 1
-          persist-credentials: false
+          persist-credentials: true
 
       - name: Configure Git author for worker commits
         run: |
