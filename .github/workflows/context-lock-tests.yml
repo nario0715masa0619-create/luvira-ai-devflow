@@ -3,7 +3,7 @@ name: Context Lock tests
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, "worker/**"]
 
 permissions:
   contents: read

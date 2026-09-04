@@ -73,6 +73,39 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json["reason"], "github_worker_not_configured")
 
+    def test_worker_eligibility_uses_github_workflow_records(self):
+        configured = {
+            "GITHUB_WORKER_APP_ID": "4823016",
+            "GITHUB_WORKER_INSTALLATION_ID": "158901090",
+            "GITHUB_WORKER_PRIVATE_KEY": "test-key",
+        }
+        proposal = {"repository": "nario0715masa0619-create/luvira-ai-devflow", "issue": 42, "source_branch": "worker/issue-42-safe-change"}
+        evidence = {"head_sha": "abc123", "workflows": {"Context Lock tests": "success", "Orchestrator tests": "success"}}
+        with patch.dict(os.environ, configured), patch("main.github_worker_quality_evidence", return_value=evidence) as lookup:
+            response = self.client.post("/worker/eligibility", json=proposal)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "ELIGIBLE_FOR_DRAFT_PR", "issue": 42, "head_sha": "abc123"})
+        lookup.assert_called_once_with("4823016", "158901090", "test-key", "worker/issue-42-safe-change")
+
+    def test_worker_eligibility_blocks_missing_github_workflow(self):
+        configured = {
+            "GITHUB_WORKER_APP_ID": "4823016",
+            "GITHUB_WORKER_INSTALLATION_ID": "158901090",
+            "GITHUB_WORKER_PRIVATE_KEY": "test-key",
+        }
+        proposal = {"repository": "nario0715masa0619-create/luvira-ai-devflow", "issue": 42, "source_branch": "worker/issue-42-safe-change"}
+        evidence = {"head_sha": "abc123", "workflows": {"Context Lock tests": "success", "Orchestrator tests": "missing"}}
+        with patch.dict(os.environ, configured), patch("main.github_worker_quality_evidence", return_value=evidence):
+            response = self.client.post("/worker/eligibility", json=proposal)
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json["status"], "PENDING_QUALITY_GATES")
+        self.assertEqual(response.json["missing"], ["Orchestrator tests"])
+
+    def test_worker_eligibility_blocks_branch_outside_issue_scope(self):
+        response = self.client.post("/worker/eligibility", json={"repository": "nario0715masa0619-create/luvira-ai-devflow", "issue": 42, "source_branch": "main"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json["reason"], "source_branch_not_allowed")
+
     def test_blocks_other_repository(self):
         response = self.client.post("/events", json=event({"repository": "other/repository", "action": "opened", "issue": 1}))
         self.assertEqual(response.status_code, 403)

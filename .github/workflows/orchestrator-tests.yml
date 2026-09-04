@@ -3,7 +3,7 @@ on:
   pull_request:
     paths: ["orchestrator/**"]
   push:
-    branches: [main]
+    branches: [main, "worker/**"]
     paths: ["orchestrator/**"]
 permissions:
   contents: read
