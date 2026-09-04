@@ -1,0 +1,41 @@
+name: Deploy GitHub webhook ingress
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-deployer
+          service_account: devflow-deployer@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+      - uses: google-github-actions/setup-gcloud@v2
+      - name: Build the ingress container in the dedicated staging bucket
+        run: |
+          build_id="$(gcloud builds submit orchestrator \
+            --tag us-central1-docker.pkg.dev/luvira-ai-control-plane/cloud-run-source-deploy/luvira-devflow-github-ingress:${GITHUB_SHA} \
+            --gcs-source-staging-dir gs://luvira-devflow-source-660319628285/source \
+            --async --quiet --format='value(id)')"
+          for attempt in $(seq 1 60); do
+            status="$(gcloud builds describe "$build_id" --format='value(status)')"
+            [ "$status" = "SUCCESS" ] && break
+            [ "$status" = "FAILURE" ] || [ "$status" = "CANCELLED" ] || [ "$status" = "EXPIRED" ] && exit 1
+            sleep 5
+          done
+          [ "$status" = "SUCCESS" ]
+      - name: Deploy the signed public ingress only
+        run: |
+          gcloud run deploy luvira-devflow-github-ingress \
+            --image us-central1-docker.pkg.dev/luvira-ai-control-plane/cloud-run-source-deploy/luvira-devflow-github-ingress:${GITHUB_SHA} \
+            --region us-central1 --allow-unauthenticated --quiet \
+            --service-account devflow-github-webhook@luvira-ai-control-plane.iam.gserviceaccount.com \
+            --update-env-vars PUBLIC_WEBHOOK_INGRESS_ONLY=true,ORCHESTRATOR_URL=https://luvira-devflow-orchestrator-hbnnuiauuq-uc.a.run.app \
+            --set-secrets GITHUB_WEBHOOK_SECRET=github-webhook-signing-secret:latest

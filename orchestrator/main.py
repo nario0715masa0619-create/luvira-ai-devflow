@@ -10,6 +10,8 @@ from urllib.request import Request, urlopen
 
 import jwt
 from flask import Flask, jsonify, request
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2 import id_token
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -22,6 +24,15 @@ RUNNER_ORDER = tuple(
 ALLOWED_RUNNERS = frozenset({"opencode-go", "copilot", "codex", "claude-code"})
 OPENCODE_GO_MODELS_URL = "https://opencode.ai/zen/go/v1/models"
 GITHUB_API_URL = "https://api.github.com"
+PUBLIC_WEBHOOK_INGRESS_ONLY = os.environ.get("PUBLIC_WEBHOOK_INGRESS_ONLY", "").lower() in {"1", "true", "yes"}
+ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "").rstrip("/")
+
+
+@app.before_request
+def restrict_public_ingress():
+    """A public ingress instance exposes exactly one signed webhook route."""
+    if PUBLIC_WEBHOOK_INGRESS_ONLY and request.path != "/github/webhook":
+        return jsonify(status="BLOCKED", reason="public_ingress_route_not_allowed"), 404
 
 
 @app.post("/events")
@@ -79,6 +90,17 @@ def github_webhook():
         return jsonify(status="BLOCKED", reason="repository_mismatch"), 403
     if action not in {"opened", "labeled", "edited"} or not isinstance(issue, int):
         return jsonify(status="BLOCKED", reason="unsupported_event"), 400
+
+    if PUBLIC_WEBHOOK_INGRESS_ONLY:
+        if not ORCHESTRATOR_URL:
+            logging.error("BLOCKED public webhook ingress has no internal destination")
+            return jsonify(status="BLOCKED", reason="orchestrator_destination_not_configured"), 503
+        try:
+            status, response = forward_signed_webhook(raw, supplied, event_name)
+        except (HTTPError, URLError, TimeoutError, ValueError):
+            logging.warning("BLOCKED public webhook ingress could not reach internal orchestrator")
+            return jsonify(status="BLOCKED", reason="orchestrator_unavailable"), 503
+        return jsonify(response), status
 
     return pending_context_lock(repository, issue, action)
 
@@ -276,3 +298,26 @@ def github_api_request(url, method="GET", token=None):
     if not isinstance(result, dict):
         raise ValueError("invalid GitHub API response")
     return result
+
+
+def forward_signed_webhook(raw, signature, event_name):
+    """Forward a verified payload to the private service using a Cloud Run ID token."""
+    token = id_token.fetch_id_token(GoogleAuthRequest(), ORCHESTRATOR_URL)
+    internal_request = Request(
+        f"{ORCHESTRATOR_URL}/github/webhook",
+        data=raw,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "X-GitHub-Event": event_name,
+            "X-Hub-Signature-256": signature,
+            "User-Agent": "luvira-devflow-github-ingress/1",
+        },
+    )
+    with urlopen(internal_request, timeout=10) as response:  # nosec B310: configured Cloud Run destination
+        payload = json.loads(response.read().decode())
+        status = response.status
+    if not isinstance(payload, dict):
+        raise ValueError("invalid internal orchestrator response")
+    return status, payload

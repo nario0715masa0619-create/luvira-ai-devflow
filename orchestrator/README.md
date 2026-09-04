@@ -12,6 +12,13 @@ Cloud Run上でGitHubイベントを受け、対象リポジトリとIssueをfai
 6. `/readiness/opencode-go` は、Secret Managerから実行中だけ渡されるキーでOpenCode Goのモデル一覧に接続する。キー、モデル名、プロンプトは応答・ログへ出さず、接続可否と件数だけを返す。コード生成は行わない。
 7. `/readiness/github-worker` は、Secret Managerから実行中だけ渡されるWorker App鍵でGitHubのインストールIDを読取り検証する。アクセストークンの発行、ブランチ作成、PR作成、コード変更は行わない。
 8. `/worker/eligibility` は、将来Workerが書込みを行う前の読取り専用ゲートである。自己申告の結果を受け取らず、GitHub上のブランチ先端SHAと必須CIワークフローの成功記録を直接照合する。結果が欠ける場合は fail-closed で停止する。
+9. GitHub Webhook は専用の公開入口サービスだけで受信する。この入口は `/github/webhook` 以外を404で拒否し、署名を検証したイベントだけをCloud Run IDトークン付きで非公開オーケストレーターへ中継する。公開入口にはWorker鍵・OpenCodeキーを渡さない。
+
+## GitHub Webhook入口のデプロイ前提
+
+- `devflow-github-webhook` は公開入口専用サービスアカウントである。`github-webhook-signing-secret` の参照と、`luvira-devflow-orchestrator` への Cloud Run Invoker のみを付与する。
+- `devflow-deployer` には、この入口サービスアカウントを指定してデプロイするための Service Account User のみを付与する。
+- `.github/workflows/deploy-github-webhook-ingress.yml` は入口サービスだけを公開する。オーケストレーター本体は引き続き非公開のままである。
 
 ## 権限分離
 
