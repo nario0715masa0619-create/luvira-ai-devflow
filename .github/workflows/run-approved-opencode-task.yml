@@ -31,6 +31,11 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      - name: Configure Git author for worker commits
+        run: |
+          git config user.name "luvira-ai-worker[bot]"
+          git config user.email "luvira-ai-worker[bot]@users.noreply.github.com"
+
       - name: Authenticate the dedicated OpenCode runner
         uses: google-github-actions/auth@v2
         with:
