@@ -119,6 +119,18 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "PENDING_CONTEXT_LOCK")
 
+    def test_github_webhook_end_to_end_receipt(self):
+        payload = {"action": "opened", "repository": {"full_name": "nario0715masa0619-create/luvira-ai-devflow"}, "issue": {"number": 99}}
+        raw = json.dumps(payload).encode()
+        signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
+        response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "PENDING_CONTEXT_LOCK")
+        self.assertEqual(response.json["issue"], 99)
+        self.assertEqual(response.json["repository"], "nario0715masa0619-create/luvira-ai-devflow")
+        self.assertEqual(response.json["execution"]["primary"], "opencode-go")
+        self.assertIn("codex_independent_review", response.json["quality_gates"])
+
     def test_blocks_unsigned_github_issue(self):
         response = self.client.post("/github/webhook", json={"action": "opened"}, headers={"X-GitHub-Event": "issues"})
         self.assertEqual(response.status_code, 401)
