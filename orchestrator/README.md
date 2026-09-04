@@ -11,6 +11,7 @@ Cloud Run上でGitHubイベントを受け、対象リポジトリとIssueをfai
 5. Context Lock、独立AIレビュー、監視、保護ルールを満たすまで、コード変更・マージ・デプロイへ進まない。
 6. `/readiness/opencode-go` は、Secret Managerから実行中だけ渡されるキーでOpenCode Goのモデル一覧に接続する。キー、モデル名、プロンプトは応答・ログへ出さず、接続可否と件数だけを返す。コード生成は行わない。
 7. `/readiness/github-worker` は、Secret Managerから実行中だけ渡されるWorker App鍵でGitHubのインストールIDを読取り検証する。アクセストークンの発行、ブランチ作成、PR作成、コード変更は行わない。
+8. `/worker/eligibility` は、将来Workerが書込みを行う前の読取り専用ゲートである。自己申告の結果を受け取らず、GitHub上のブランチ先端SHAと必須CIワークフローの成功記録を直接照合する。結果が欠ける場合は fail-closed で停止する。
 
 ## 権限分離
 

@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from urllib.parse import quote
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -130,6 +131,37 @@ def github_worker_readiness():
     return jsonify(status="READY", provider="github-worker", installation_id=int(installation_id), account=account)
 
 
+@app.post("/worker/eligibility")
+def worker_eligibility():
+    """Read GitHub's immutable CI records before any future Worker write is considered."""
+    proposal = request.get_json(silent=True) or {}
+    issue = proposal.get("issue")
+    source_branch = proposal.get("source_branch")
+    if proposal.get("repository") != EXPECTED_REPOSITORY or not isinstance(issue, int) or issue < 1:
+        return jsonify(status="BLOCKED", reason="repository_or_issue_mismatch"), 400
+    if not isinstance(source_branch, str) or not source_branch.startswith(f"worker/issue-{issue}-"):
+        return jsonify(status="BLOCKED", reason="source_branch_not_allowed"), 400
+
+    app_id = os.environ.get("GITHUB_WORKER_APP_ID", "")
+    installation_id = os.environ.get("GITHUB_WORKER_INSTALLATION_ID", "")
+    private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
+    if not app_id or not installation_id or not private_key:
+        logging.error("GITHUB_WORKER_BLOCKED eligibility credential is not configured")
+        return jsonify(status="BLOCKED", reason="github_worker_not_configured"), 503
+    try:
+        evidence = github_worker_quality_evidence(app_id, installation_id, private_key, source_branch)
+    except (HTTPError, URLError, TimeoutError, ValueError, jwt.PyJWTError, KeyError):
+        logging.warning("GITHUB_WORKER_BLOCKED eligibility lookup failed")
+        return jsonify(status="BLOCKED", reason="github_worker_unavailable"), 503
+
+    missing = [name for name, conclusion in evidence["workflows"].items() if conclusion != "success"]
+    if missing:
+        logging.info("GITHUB_WORKER_PENDING_QUALITY issue=%s missing=%s", issue, ",".join(missing))
+        return jsonify(status="PENDING_QUALITY_GATES", issue=issue, head_sha=evidence["head_sha"], missing=missing), 409
+    logging.info("GITHUB_WORKER_ELIGIBLE issue=%s sha=%s", issue, evidence["head_sha"])
+    return jsonify(status="ELIGIBLE_FOR_DRAFT_PR", issue=issue, head_sha=evidence["head_sha"])
+
+
 def pending_context_lock(repository, issue, action):
     """Return a fail-closed routing plan; this endpoint never runs an AI itself."""
     valid_order = [runner for runner in RUNNER_ORDER if runner in ALLOWED_RUNNERS]
@@ -196,3 +228,51 @@ def github_worker_installation(app_id, installation_id, private_key):
     if not isinstance(payload, dict):
         raise ValueError("invalid GitHub installation response")
     return payload
+
+
+def github_worker_quality_evidence(app_id, installation_id, private_key, source_branch):
+    """Read only GitHub branch and workflow records; never create a branch, PR, or commit."""
+    now = int(time.time())
+    app_jwt = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": app_id}, private_key, algorithm="RS256")
+    installation_token = github_api_request(
+        f"{GITHUB_API_URL}/app/installations/{installation_id}/access_tokens",
+        method="POST",
+        token=app_jwt,
+    ).get("token")
+    if not isinstance(installation_token, str):
+        raise ValueError("invalid GitHub installation token response")
+    ref = github_api_request(
+        f"{GITHUB_API_URL}/repos/{EXPECTED_REPOSITORY}/git/ref/heads/{quote(source_branch, safe='')}",
+        token=installation_token,
+    )
+    head_sha = ((ref.get("object") or {}).get("sha"))
+    if not isinstance(head_sha, str):
+        raise ValueError("invalid GitHub ref response")
+    runs = github_api_request(
+        f"{GITHUB_API_URL}/repos/{EXPECTED_REPOSITORY}/actions/runs?head_sha={quote(head_sha, safe='')}&per_page=100",
+        token=installation_token,
+    ).get("workflow_runs")
+    if not isinstance(runs, list):
+        raise ValueError("invalid GitHub workflow response")
+    required = {"Context Lock tests", "Orchestrator tests"}
+    outcomes = {name: "missing" for name in required}
+    for run in runs:
+        if run.get("name") in required and run.get("conclusion") == "success":
+            outcomes[run["name"]] = "success"
+    return {"head_sha": head_sha, "workflows": outcomes}
+
+
+def github_api_request(url, method="GET", token=None):
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "luvira-devflow-worker-eligibility/1",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    request = Request(url, headers=headers, method=method)
+    with urlopen(request, timeout=10) as response:  # nosec B310: fixed GitHub HTTPS endpoint
+        result = json.loads(response.read().decode())
+    if not isinstance(result, dict):
+        raise ValueError("invalid GitHub API response")
+    return result
