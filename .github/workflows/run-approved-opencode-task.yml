@@ -52,6 +52,7 @@ jobs:
           config_file="$RUNNER_TEMP/opencode.json"
           gcloud secrets versions access latest --secret opencode-go-api-key-devflow --project luvira-ai-control-plane > "$key_file"
           chmod 600 "$key_file"
+          rm -f gha-creds-*.json
           cat > "$config_file" <<EOF
           {
             "\$schema": "https://opencode.ai/config.json",
@@ -104,4 +105,4 @@ jobs:
             relevant deterministic tests. Do not modify GitHub Actions,
             deployment files, IAM, secrets, branch protection, or any
             authentication configuration. Never merge, deploy, or create or
-            reveal credentials. Create a pull request only when the tests pass.
+            reveal credentials. Before committing, inspect git status and never stage credentials, gha-creds-*.json, __pycache__/, or *.pyc files. Create a pull request only when the tests pass.
