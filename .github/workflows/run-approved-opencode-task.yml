@@ -60,7 +60,7 @@ jobs:
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "OpenCode Go",
                 "options": {
-                  "baseURL": "https://opencode.ai/zen/go/v1/chat/completions",
+                  "baseURL": "https://opencode.ai/zen/go/v1",
                   "apiKey": "{file:$key_file}"
                 },
                 "models": {
