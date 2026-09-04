@@ -38,4 +38,4 @@ jobs:
             --region us-central1 --no-allow-unauthenticated --quiet \
             --service-account devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com \
             --update-env-vars GITHUB_WORKER_APP_ID=4823016,GITHUB_WORKER_INSTALLATION_ID=158901090 \
-            --set-secrets OPENCODE_GO_API_KEY=opencode-go-api-key:latest,GITHUB_WORKER_PRIVATE_KEY=github-app-luvirai-worker-private-key:latest
+            --set-secrets OPENCODE_GO_API_KEY=opencode-go-api-key:latest,GITHUB_WORKER_PRIVATE_KEY=github-app-luvirai-worker-private-key:latest,GITHUB_WEBHOOK_SECRET=github-webhook-signing-secret:latest
