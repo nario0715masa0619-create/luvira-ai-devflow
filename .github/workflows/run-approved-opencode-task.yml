@@ -50,7 +50,7 @@ jobs:
         run: |
           key_file="$RUNNER_TEMP/opencode-go-api-key"
           config_file="$RUNNER_TEMP/opencode.json"
-          gcloud secrets versions access latest --secret opencode-go-api-key --project luvira-ai-control-plane > "$key_file"
+          gcloud secrets versions access latest --secret opencode-go-api-key-devflow --project luvira-ai-control-plane > "$key_file"
           chmod 600 "$key_file"
           cat > "$config_file" <<EOF
           {
