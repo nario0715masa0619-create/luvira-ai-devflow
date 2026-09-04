@@ -59,8 +59,12 @@ jobs:
                   "apiKey": "{file:$key_file}"
                 },
                 "models": {
-                  "gpt-5.6-luna": {
-                    "name": "GPT-5.6 Luna",
+                  "kimi-k2.6": {
+                    "name": "Kimi K2.6",
+                    "limit": {"context": 262144, "output": 65536}
+                  },
+                  "deepseek-v4-flash": {
+                    "name": "DeepSeek V4 Flash",
                     "limit": {"context": 272000, "output": 128000}
                   }
                 }
@@ -81,7 +85,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          model: opencode-go/gpt-5.6-luna
+          model: opencode-go/kimi-k2.6
           use_github_token: true
           share: false
           prompt: |
