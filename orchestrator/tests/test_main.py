@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
+import main
 from main import app
 
 
@@ -128,3 +129,22 @@ class EventTest(unittest.TestCase):
         response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-GitHub-Event": "ping", "X-Hub-Signature-256": signature})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json, {"status": "OK", "event": "ping"})
+
+    def test_public_webhook_ingress_rejects_every_route_except_webhook(self):
+        with patch("main.PUBLIC_WEBHOOK_INGRESS_ONLY", True):
+            response = self.client.get("/healthz")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json, {"status": "BLOCKED", "reason": "public_ingress_route_not_allowed"})
+
+    def test_public_webhook_ingress_forwards_verified_issue_to_private_orchestrator(self):
+        payload = {"action": "opened", "repository": {"full_name": "nario0715masa0619-create/luvira-ai-devflow"}, "issue": {"number": 7}}
+        raw = json.dumps(payload).encode()
+        signature = "sha256=" + hmac.new(b"test-secret", raw, "sha256").hexdigest()
+        with patch("main.PUBLIC_WEBHOOK_INGRESS_ONLY", True), patch("main.ORCHESTRATOR_URL", "https://private.example"):
+            with patch("main.forward_signed_webhook", return_value=(200, {"status": "PENDING_CONTEXT_LOCK"})) as forward:
+                response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-Hub-Signature-256": signature, "X-GitHub-Event": "issues"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "PENDING_CONTEXT_LOCK"})
+        forward.assert_called_once_with(raw, signature, "issues")
