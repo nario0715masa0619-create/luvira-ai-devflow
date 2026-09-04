@@ -65,6 +65,12 @@ jobs:
                   }
                 }
               }
+            },
+            "permission": {
+              "external_directory": {
+                "*": "deny",
+                "/home/runner/work/_temp/_github_workflow/**": "allow"
+              }
             }
           }
           EOF
