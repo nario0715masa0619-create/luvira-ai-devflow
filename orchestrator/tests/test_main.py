@@ -54,6 +54,25 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json["reason"], "opencode_go_not_configured")
 
+    def test_github_worker_readiness_returns_identity_only(self):
+        configured = {
+            "GITHUB_WORKER_APP_ID": "4823016",
+            "GITHUB_WORKER_INSTALLATION_ID": "158901090",
+            "GITHUB_WORKER_PRIVATE_KEY": "test-key",
+        }
+        installation = {"id": 158901090, "account": {"login": "nario0715masa0619-create"}}
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value=installation) as verify:
+            response = self.client.get("/readiness/github-worker")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "READY", "provider": "github-worker", "installation_id": 158901090, "account": "nario0715masa0619-create"})
+        verify.assert_called_once_with("4823016", "158901090", "test-key")
+
+    def test_github_worker_readiness_blocks_without_configuration(self):
+        with patch.dict(os.environ, {"GITHUB_WORKER_APP_ID": "", "GITHUB_WORKER_INSTALLATION_ID": "", "GITHUB_WORKER_PRIVATE_KEY": ""}):
+            response = self.client.get("/readiness/github-worker")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json["reason"], "github_worker_not_configured")
+
     def test_blocks_other_repository(self):
         response = self.client.post("/events", json=event({"repository": "other/repository", "action": "opened", "issue": 1}))
         self.assertEqual(response.status_code, 403)
