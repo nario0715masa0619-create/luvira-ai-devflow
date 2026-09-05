@@ -1,0 +1,24 @@
+name: Reject generated artifacts
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  reject-generated-artifacts:
+    name: Reject generated artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check changed file names
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          forbidden="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${{ github.event.pull_request.number }}/files" --jq '.[].filename' | grep -E '(^|/)gha-creds-[^/]+\.json$|(^|/)__pycache__/|\.py[co]$' || true)"
+          if [ -n "$forbidden" ]; then
+            echo "Refusing this pull request: generated or credential artifacts found."
+            echo "$forbidden"
+            exit 1
+          fi
