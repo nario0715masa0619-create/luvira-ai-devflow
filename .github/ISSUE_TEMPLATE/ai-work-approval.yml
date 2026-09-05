@@ -78,6 +78,6 @@ body:
     id: expiry
     attributes:
       label: 有効期限（UTC）
-      placeholder: 2026-12-31T00:00:00Z
+      placeholder: "2026-12-31T00:00:00Z"
     validations:
       required: true
