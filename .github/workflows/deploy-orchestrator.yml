@@ -50,6 +50,7 @@ jobs:
         with:
           workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-deployer
           service_account: devflow-deployer@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
           token_format: id_token
           id_token_audience: ${{ steps.deployed-service.outputs.url }}
           id_token_include_email: true
