@@ -1,6 +1,7 @@
 import unittest
+from unittest.mock import Mock
 
-from control_plane import ControlPlane, InMemoryTaskStore, TaskConflict, TaskStatus, spec_hash
+from control_plane import ControlPlane, FirestoreTaskStore, InMemoryTaskStore, TaskConflict, TaskStatus, spec_hash
 
 
 def valid_spec():
@@ -49,3 +50,42 @@ class ControlPlaneTest(unittest.TestCase):
             self.control_plane.create_draft(valid_spec(), "intake", task_id="task-1")
         with self.assertRaisesRegex(TaskConflict, "invalid_transition_from_DRAFT"):
             self.control_plane.authorize(task.task_id, "human@example.test", "anything")
+
+
+class FirestoreTaskStoreTest(unittest.TestCase):
+    def setUp(self):
+        self.client = Mock()
+        self.collection = Mock()
+        self.client.collection.return_value = self.collection
+        self.store = FirestoreTaskStore(self.client)
+
+    def test_create_uses_task_id_document_and_primitive_payload(self):
+        task = ControlPlane(InMemoryTaskStore()).create_draft(valid_spec(), "intake", task_id="task-1")
+        reference = Mock()
+        self.collection.document.return_value = reference
+
+        self.store.create(task)
+
+        self.collection.document.assert_called_once_with("task-1")
+        payload = reference.create.call_args.args[0]
+        self.assertEqual(payload["task_id"], "task-1")
+        self.assertEqual(payload["status"], "DRAFT")
+        self.assertEqual(payload["revision"], 1)
+
+    def test_stale_writer_is_rejected_before_transaction_commit(self):
+        task = ControlPlane(InMemoryTaskStore()).create_draft(valid_spec(), "intake", task_id="task-1")
+        task.revision = 1
+        reference = Mock()
+        snapshot = Mock(exists=True)
+        newer = task.storage_dict()
+        newer["revision"] = 2
+        snapshot.to_dict.return_value = newer
+        reference.get.return_value = snapshot
+        self.collection.document.return_value = reference
+        transaction = Mock()
+        self.client.transaction.return_value = transaction
+
+        with self.assertRaisesRegex(TaskConflict, "stale_task_revision"):
+            self.store.save(task)
+
+        transaction.commit.assert_not_called()

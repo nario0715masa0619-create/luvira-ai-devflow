@@ -16,6 +16,8 @@ import json
 from typing import Any, Protocol
 from uuid import uuid4
 
+from google.api_core.exceptions import AlreadyExists
+
 
 class TaskStatus(str, Enum):
     DRAFT = "DRAFT"
@@ -64,11 +66,45 @@ class TaskRecord:
     approved_by: str | None = None
     approved_at: str | None = None
     audit_events: list[AuditEvent] = field(default_factory=list)
+    revision: int = 1
 
     def public_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["status"] = self.status.value
         return value
+
+    def storage_dict(self) -> dict[str, Any]:
+        """Stable primitive representation suitable for a durable store."""
+        return {
+            "task_id": self.task_id,
+            "spec": self.spec,
+            "spec_hash": self.spec_hash,
+            "status": self.status.value,
+            "created_at": self.created_at,
+            "approval_binding": self.approval_binding,
+            "approved_by": self.approved_by,
+            "approved_at": self.approved_at,
+            "audit_events": [asdict(event) for event in self.audit_events],
+            "revision": self.revision,
+        }
+
+    @classmethod
+    def from_storage(cls, value: dict[str, Any]) -> "TaskRecord":
+        try:
+            return cls(
+                task_id=value["task_id"],
+                spec=value["spec"],
+                spec_hash=value["spec_hash"],
+                status=TaskStatus(value["status"]),
+                created_at=value["created_at"],
+                approval_binding=value.get("approval_binding"),
+                approved_by=value.get("approved_by"),
+                approved_at=value.get("approved_at"),
+                audit_events=[AuditEvent(**event) for event in value.get("audit_events", [])],
+                revision=value["revision"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ControlPlaneError("stored_task_is_invalid") from exc
 
 
 class InMemoryTaskStore:
@@ -92,6 +128,50 @@ class InMemoryTaskStore:
         if task.task_id not in self._tasks:
             raise TaskNotFound("task_not_found")
         self._tasks[task.task_id] = task
+
+
+class FirestoreTaskStore:
+    """Durable, optimistic-concurrency store for the control plane.
+
+    The caller supplies an authenticated Firestore client.  No credential is
+    accepted by this class; deployed service identity is the only credential
+    source.  A stale writer is rejected instead of overwriting an approval or
+    state transition created by another request.
+    """
+
+    def __init__(self, client: Any, collection: str = "devflow_control_plane_tasks"):
+        if not collection or "/" in collection:
+            raise ControlPlaneError("invalid_task_collection")
+        self._client = client
+        self._collection = client.collection(collection)
+
+    def create(self, task: TaskRecord) -> None:
+        try:
+            self._collection.document(task.task_id).create(task.storage_dict())
+        except AlreadyExists as exc:
+            raise TaskConflict("task_id_already_exists") from exc
+
+    def get(self, task_id: str) -> TaskRecord:
+        snapshot = self._collection.document(task_id).get()
+        if not snapshot.exists:
+            raise TaskNotFound("task_not_found")
+        return TaskRecord.from_storage(snapshot.to_dict())
+
+    def save(self, task: TaskRecord) -> None:
+        reference = self._collection.document(task.task_id)
+        transaction = self._client.transaction()
+        snapshot = reference.get(transaction=transaction)
+        if not snapshot.exists:
+            raise TaskNotFound("task_not_found")
+        stored = TaskRecord.from_storage(snapshot.to_dict())
+        if stored.revision != task.revision:
+            raise TaskConflict("stale_task_revision")
+        next_revision = task.revision + 1
+        payload = task.storage_dict()
+        payload["revision"] = next_revision
+        transaction.set(reference, payload)
+        transaction.commit()
+        task.revision = next_revision
 
 
 def canonical_json(value: Any) -> str:

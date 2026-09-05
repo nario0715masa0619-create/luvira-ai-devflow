@@ -1,6 +1,7 @@
 ## Python runtime artifacts
 __pycache__/
 *.py[cod]
+.venv/
 
 ## GitHub Actions ephemeral credentials
 gha-creds-*.json
