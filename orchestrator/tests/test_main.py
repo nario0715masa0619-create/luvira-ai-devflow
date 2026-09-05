@@ -55,6 +55,27 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json["reason"], "opencode_go_not_configured")
 
+    def test_control_plane_readiness_blocks_without_deployed_store(self):
+        response = self.client.get("/readiness/control-plane")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json["reason"], "control_plane_not_configured")
+
+    def test_control_plane_factory_requires_explicit_firestore_configuration(self):
+        with patch("main.TASK_STORE_BACKEND", ""):
+            with self.assertRaisesRegex(RuntimeError, "control_plane_backend_must_be_firestore"):
+                main.create_control_plane_from_environment()
+
+    def test_control_plane_readiness_uses_read_only_firestore_probe(self):
+        store = unittest.mock.Mock(spec=main.FirestoreTaskStore)
+        control_plane = unittest.mock.Mock(store=store)
+        with patch("main.CONTROL_PLANE", control_plane), patch("main.FIRESTORE_TASK_COLLECTION", "devflow_control_plane_tasks"):
+            response = self.client.get("/readiness/control-plane")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["backend"], "firestore")
+        store.readiness_check.assert_called_once_with()
+
     def test_github_worker_readiness_returns_identity_only(self):
         configured = {
             "GITHUB_WORKER_APP_ID": "4823016",
