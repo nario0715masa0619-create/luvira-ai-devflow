@@ -3,6 +3,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from urllib.parse import quote
 from urllib.error import HTTPError, URLError
@@ -14,7 +15,7 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import firestore
 from google.oauth2 import id_token
 
-from control_plane import ControlPlane, FirestoreTaskStore
+from control_plane import ControlPlane, ControlPlaneError, FirestoreTaskStore, TaskConflict, TaskStatus, spec_hash
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -126,7 +127,7 @@ def github_webhook():
             return jsonify(status="BLOCKED", reason="orchestrator_unavailable"), 503
         return jsonify(response), status
 
-    return pending_context_lock(repository, issue, action)
+    return register_approval_issue(payload, repository, issue, action)
 
 
 @app.get("/healthz")
@@ -257,6 +258,107 @@ def pending_context_lock(repository, issue, action):
             "governance": "context lock, policy, credentials and audit integrity",
         },
     )
+
+
+def register_approval_issue(payload, repository, issue, action):
+    """Persist a signed Issue Form as an immutable approval candidate.
+
+    This is intentionally the final operation of webhook intake.  It does not
+    select a model, enqueue a worker, create a branch, or call an AI provider.
+    """
+    if CONTROL_PLANE is None:
+        logging.error("CONTROL_PLANE_BLOCKED durable store is not initialized")
+        return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
+    try:
+        spec = approval_issue_spec(payload, repository, issue)
+        task_id = f"github-issue-{issue}-{spec_hash(spec)[:16]}"
+        try:
+            task = CONTROL_PLANE.create_draft(spec, actor="github-webhook", task_id=task_id)
+        except TaskConflict:
+            task = CONTROL_PLANE.store.get(task_id)
+        if task.status is TaskStatus.DRAFT:
+            task = CONTROL_PLANE.validate(task.task_id, actor="control-plane")
+        if task.status is TaskStatus.VALIDATED:
+            task = CONTROL_PLANE.request_human_approval(task.task_id, actor="control-plane")
+    except (ControlPlaneError, ValueError):
+        logging.warning("CONTROL_PLANE_BLOCKED invalid approval issue=%s action=%s", issue, action)
+        return jsonify(status="BLOCKED", reason="invalid_approval_issue"), 400
+
+    if task.status is not TaskStatus.AWAITING_HUMAN_APPROVAL:
+        logging.warning("CONTROL_PLANE_BLOCKED task=%s status=%s", task.task_id, task.status.value)
+        return jsonify(status="BLOCKED", reason="approval_task_not_pending"), 409
+    return jsonify(
+        status="AWAITING_HUMAN_APPROVAL",
+        task_id=task.task_id,
+        spec_hash=task.spec_hash,
+        approval_binding=task.approval_binding,
+        issue=issue,
+    )
+
+
+def approval_issue_spec(payload, repository, issue_number):
+    """Parse only the fixed Issue Form fields into the control-plane schema."""
+    issue = payload.get("issue") or {}
+    labels = {item.get("name") for item in issue.get("labels", []) if isinstance(item, dict)}
+    if "ai-approval" not in labels:
+        raise ValueError("approval_label_required")
+    body = issue.get("body")
+    if not isinstance(body, str):
+        raise ValueError("approval_form_body_required")
+    form = {label: issue_form_value(body, label) for label in (
+        "Project ID", "Repository", "承認すること", "タスク種別", "受入条件",
+        "最大コスト（USD）", "影響", "しないこと", "許可を求める最初のアクション", "有効期限（UTC）",
+    )}
+    if form["Repository"] != repository:
+        raise ValueError("repository_form_mismatch")
+    criteria = [line.strip("- ") for line in form["受入条件"].splitlines() if line.strip()]
+    try:
+        max_cost_usd = float(form["最大コスト（USD）"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("invalid_max_cost_usd") from exc
+    if not criteria or max_cost_usd <= 0:
+        raise ValueError("invalid_approval_form")
+    return {
+        "project_id": form["Project ID"],
+        "repository": repository,
+        "base_commit": github_default_branch_sha(repository),
+        "task_type": form["タスク種別"],
+        "acceptance_criteria": criteria,
+        "budget": {"max_cost_usd": max_cost_usd},
+        "requested_action": form["許可を求める最初のアクション"],
+        "approval": form["承認すること"],
+        "impact": form["影響"],
+        "excluded": form["しないこと"],
+        "expiry": form["有効期限（UTC）"],
+        "source": {"issue_number": issue_number, "issue_node_id": issue.get("node_id")},
+    }
+
+
+def issue_form_value(body, label):
+    pattern = rf"^### {re.escape(label)}\s*$\n+([\s\S]*?)(?=^### |\Z)"
+    match = re.search(pattern, body, flags=re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def github_default_branch_sha(repository):
+    """Read the exact main SHA with the Worker App; it never writes to GitHub."""
+    app_id = os.environ.get("GITHUB_WORKER_APP_ID", "")
+    installation_id = os.environ.get("GITHUB_WORKER_INSTALLATION_ID", "")
+    private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
+    if not app_id or not installation_id or not private_key:
+        raise ValueError("github_worker_not_configured")
+    now_epoch = int(time.time())
+    app_jwt = jwt.encode({"iat": now_epoch - 60, "exp": now_epoch + 540, "iss": app_id}, private_key, algorithm="RS256")
+    installation_token = github_api_request(
+        f"{GITHUB_API_URL}/app/installations/{installation_id}/access_tokens", method="POST", token=app_jwt
+    ).get("token")
+    if not isinstance(installation_token, str):
+        raise ValueError("invalid_installation_token")
+    ref = github_api_request(f"{GITHUB_API_URL}/repos/{repository}/git/ref/heads/main", token=installation_token)
+    sha = (ref.get("object") or {}).get("sha")
+    if not isinstance(sha, str) or not sha:
+        raise ValueError("invalid_base_commit")
+    return sha
 
 
 def opencode_go_model_count(api_key):

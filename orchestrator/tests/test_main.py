@@ -133,12 +133,67 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_accepts_signed_github_issue(self):
-        payload = {"action": "opened", "repository": {"full_name": "nario0715masa0619-create/luvira-ai-devflow"}, "issue": {"number": 26}}
+        payload = self.approval_issue_payload(26)
         raw = json.dumps(payload).encode()
         signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
-        response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature})
+        task = unittest.mock.Mock(status=main.TaskStatus.AWAITING_HUMAN_APPROVAL, task_id="task-26", spec_hash="abc", approval_binding="binding")
+        with patch("main.CONTROL_PLANE", unittest.mock.Mock()), patch("main.approval_issue_spec", return_value={"repository": "nario0715masa0619-create/luvira-ai-devflow"}), patch("main.spec_hash", return_value="a" * 64), patch("main.github_default_branch_sha", return_value="base"):
+            main.CONTROL_PLANE.create_draft.return_value = task
+            response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json["status"], "PENDING_CONTEXT_LOCK")
+        self.assertEqual(response.json["status"], "AWAITING_HUMAN_APPROVAL")
+        self.assertEqual(response.json["task_id"], "task-26")
+
+    def approval_issue_payload(self, number):
+        body = """### Project ID
+
+devflow
+### Repository
+
+nario0715masa0619-create/luvira-ai-devflow
+### 承認すること
+
+Read the repository
+### タスク種別
+
+documentation
+### 受入条件
+
+- README is reviewed
+### 最大コスト（USD）
+
+1.00
+### 影響
+
+Read only
+### しないこと
+
+No writes
+### 許可を求める最初のアクション
+
+read
+### 有効期限（UTC）
+
+2026-12-31T00:00:00Z
+"""
+        return {"action": "opened", "repository": {"full_name": "nario0715masa0619-create/luvira-ai-devflow"}, "issue": {"number": number, "node_id": "issue-node", "labels": [{"name": "ai-approval"}], "body": body}}
+
+    def test_approval_issue_form_becomes_control_plane_spec(self):
+        payload = self.approval_issue_payload(31)
+        with patch("main.github_default_branch_sha", return_value="f" * 40):
+            spec = main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 31)
+
+        self.assertEqual(spec["base_commit"], "f" * 40)
+        self.assertEqual(spec["task_type"], "documentation")
+        self.assertEqual(spec["acceptance_criteria"], ["README is reviewed"])
+        self.assertEqual(spec["budget"], {"max_cost_usd": 1.0})
+        self.assertEqual(spec["source"]["issue_number"], 31)
+
+    def test_approval_issue_form_requires_ai_approval_label(self):
+        payload = self.approval_issue_payload(32)
+        payload["issue"]["labels"] = []
+        with self.assertRaisesRegex(ValueError, "approval_label_required"):
+            main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 32)
 
     def test_blocks_unsigned_github_issue(self):
         response = self.client.post("/github/webhook", json={"action": "opened"}, headers={"X-GitHub-Event": "issues"})
