@@ -17,3 +17,16 @@ jobs:
           python-version: "3.13"
       - run: pip install -r orchestrator/requirements.txt
       - run: PYTHONPATH=orchestrator python -m unittest discover -s orchestrator/tests
+      - name: Verify the production container imports every application module
+        run: |
+          set -euo pipefail
+          docker build --tag luvira-devflow-orchestrator-test orchestrator
+          container_id="$(docker run --detach --publish 18080:8080 luvira-devflow-orchestrator-test)"
+          trap 'docker logs "$container_id"; docker stop "$container_id"' EXIT
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error http://127.0.0.1:18080/healthz; then
+              exit 0
+            fi
+            sleep 1
+          done
+          exit 1
