@@ -28,6 +28,28 @@ body:
       description: 一つの具体的な作業に限定する
     validations:
       required: true
+  - type: input
+    id: task_type
+    attributes:
+      label: タスク種別
+      description: 例: documentation, test, implementation
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: 受入条件
+      description: 完了を判定できる条件を1行ずつ記載する
+    validations:
+      required: true
+  - type: input
+    id: max_cost_usd
+    attributes:
+      label: 最大コスト（USD）
+      description: 今回の作業に許容する上限。正の数で指定する
+      placeholder: "1.00"
+    validations:
+      required: true
   - type: textarea
     id: impact
     attributes:
