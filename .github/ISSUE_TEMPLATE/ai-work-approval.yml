@@ -32,7 +32,7 @@ body:
     id: task_type
     attributes:
       label: タスク種別
-      description: 例: documentation, test, implementation
+      description: "例: documentation, test, implementation"
     validations:
       required: true
   - type: textarea
