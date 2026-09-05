@@ -39,3 +39,14 @@ jobs:
             --service-account devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com \
             --update-env-vars GITHUB_WORKER_APP_ID=4823016,GITHUB_WORKER_INSTALLATION_ID=158901090,TASK_STORE_BACKEND=firestore,FIRESTORE_TASK_COLLECTION=devflow_control_plane_tasks \
             --set-secrets OPENCODE_GO_API_KEY=opencode-go-api-key:latest,GITHUB_WORKER_PRIVATE_KEY=github-app-luvirai-worker-private-key:latest,GITHUB_WEBHOOK_SECRET=github-webhook-signing-secret:latest
+      - name: Verify durable control plane after deployment
+        run: |
+          set -euo pipefail
+          service_url="$(gcloud run services describe luvira-devflow-orchestrator \
+            --region us-central1 --format='value(status.url)')"
+          identity_token="$(gcloud auth print-identity-token --audiences="$service_url")"
+          response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $identity_token" \
+            "$service_url/readiness/control-plane")"
+          test "$(jq --raw-output '.status' <<<"$response")" = "READY"
+          test "$(jq --raw-output '.backend' <<<"$response")" = "firestore"
