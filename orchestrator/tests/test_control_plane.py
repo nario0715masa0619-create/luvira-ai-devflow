@@ -89,3 +89,10 @@ class FirestoreTaskStoreTest(unittest.TestCase):
             self.store.save(task)
 
         transaction.commit.assert_not_called()
+
+    def test_readiness_check_is_read_only(self):
+        self.collection.limit.return_value.stream.return_value = []
+        self.store.readiness_check()
+
+        self.collection.limit.assert_called_once_with(1)
+        self.collection.limit.return_value.stream.assert_called_once_with()

@@ -11,7 +11,10 @@ from urllib.request import Request, urlopen
 import jwt
 from flask import Flask, jsonify, request
 from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.cloud import firestore
 from google.oauth2 import id_token
+
+from control_plane import ControlPlane, FirestoreTaskStore
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -26,6 +29,27 @@ OPENCODE_GO_MODELS_URL = "https://opencode.ai/zen/go/v1/models"
 GITHUB_API_URL = "https://api.github.com"
 PUBLIC_WEBHOOK_INGRESS_ONLY = os.environ.get("PUBLIC_WEBHOOK_INGRESS_ONLY", "").lower() in {"1", "true", "yes"}
 ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "").rstrip("/")
+TASK_STORE_BACKEND = os.environ.get("TASK_STORE_BACKEND", "").strip().lower()
+FIRESTORE_TASK_COLLECTION = os.environ.get("FIRESTORE_TASK_COLLECTION", "").strip()
+
+
+def create_control_plane_from_environment() -> ControlPlane:
+    """Create the production store only from explicit, non-secret settings."""
+    if TASK_STORE_BACKEND != "firestore":
+        raise RuntimeError("control_plane_backend_must_be_firestore")
+    if not FIRESTORE_TASK_COLLECTION:
+        raise RuntimeError("firestore_task_collection_not_configured")
+    return ControlPlane(FirestoreTaskStore(firestore.Client(), collection=FIRESTORE_TASK_COLLECTION))
+
+
+def initialize_control_plane() -> ControlPlane | None:
+    """Fail Cloud Run startup closed; local and unit-test imports remain inert."""
+    if not os.environ.get("K_SERVICE"):
+        return None
+    return create_control_plane_from_environment()
+
+
+CONTROL_PLANE = initialize_control_plane()
 
 
 @app.before_request
@@ -108,6 +132,23 @@ def github_webhook():
 @app.get("/healthz")
 def healthz():
     return jsonify(status="ok")
+
+
+@app.get("/readiness/control-plane")
+def control_plane_readiness():
+    """Read-only proof that the deployed identity can reach Firestore."""
+    if CONTROL_PLANE is None:
+        logging.error("CONTROL_PLANE_BLOCKED durable store is not initialized")
+        return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
+    try:
+        store = CONTROL_PLANE.store
+        if not isinstance(store, FirestoreTaskStore):
+            raise RuntimeError("control_plane_store_is_not_durable")
+        store.readiness_check()
+    except Exception:
+        logging.warning("CONTROL_PLANE_BLOCKED Firestore readiness check failed")
+        return jsonify(status="BLOCKED", reason="control_plane_unavailable"), 503
+    return jsonify(status="READY", backend="firestore", collection=FIRESTORE_TASK_COLLECTION)
 
 
 @app.get("/readiness/opencode-go")

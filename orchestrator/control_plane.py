@@ -173,6 +173,12 @@ class FirestoreTaskStore:
         transaction.commit()
         task.revision = next_revision
 
+    def readiness_check(self) -> None:
+        """Perform a read-only credential and database reachability check."""
+        # A bounded empty/non-empty collection read validates the deployed
+        # service identity without creating a probe document or changing data.
+        list(self._collection.limit(1).stream())
+
 
 def canonical_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
