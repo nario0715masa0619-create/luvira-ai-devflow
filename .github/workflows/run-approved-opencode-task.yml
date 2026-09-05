@@ -4,7 +4,7 @@ on:
   issue_comment:
     types: [created]
 
-# A human owner must explicitly use the activation phrase.  This workflow never
+# A human owner must explicitly use the activation phrase. This workflow never
 # runs for a PR comment, an untrusted contributor, or an ordinary Issue comment.
 permissions:
   contents: write
@@ -53,6 +53,17 @@ jobs:
           gcloud secrets versions access latest --secret opencode-go-api-key-devflow --project luvira-ai-control-plane > "$key_file"
           chmod 600 "$key_file"
           rm -f gha-creds-*.json
+          cat > .git/hooks/pre-commit <<'EOF'
+          #!/usr/bin/env bash
+          set -eu
+          forbidden="$(git diff --cached --name-only | grep -E '(^|/)gha-creds-[^/]+\.json$|(^|/)__pycache__/|\.py[co]$' || true)"
+          if [ -n "$forbidden" ]; then
+            echo "Refusing to commit generated or credential artifacts:"
+            echo "$forbidden"
+            exit 1
+          fi
+          EOF
+          chmod 700 .git/hooks/pre-commit
           cat > "$config_file" <<EOF
           {
             "\$schema": "https://opencode.ai/config.json",
