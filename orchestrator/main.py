@@ -40,7 +40,9 @@ WORKER_JOB = os.environ.get("ISOLATED_WORKER_JOB", "luvira-devflow-isolated-work
 WORKER_REGION = os.environ.get("ISOLATED_WORKER_REGION", "us-central1")
 WORKER_ARTIFACT_BUCKET = os.environ.get("ISOLATED_WORKER_ARTIFACT_BUCKET", "luvira-devflow-bootstrap-results")
 WORKER_ARTIFACT_VIEW = os.environ.get("ISOLATED_WORKER_ARTIFACT_VIEW", "bootstrap-results")
-BOOTSTRAP_CALLER_EMAIL = os.environ.get("BOOTSTRAP_CALLER_EMAIL", "devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com")
+# The protected human-approval workflow is the sole external trigger for the
+# Broker.  It already has Cloud Run Invoker and an immutable approval binding.
+BOOTSTRAP_CALLER_EMAIL = os.environ.get("BOOTSTRAP_CALLER_EMAIL", "devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com")
 
 
 def create_control_plane_from_environment() -> ControlPlane:
