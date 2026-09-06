@@ -110,6 +110,18 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json["reason"], "approval_binding_required")
 
+    def test_private_authorization_is_idempotent_only_for_the_same_binding(self):
+        task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
+        existing = unittest.mock.Mock(status=main.TaskStatus.AUTHORIZED, task_id=task_id, approval_binding="b" * 64)
+        control_plane = unittest.mock.Mock()
+        control_plane.authorize.side_effect = main.TaskConflict("invalid_transition")
+        control_plane.store.get.return_value = existing
+        with patch("main.CONTROL_PLANE", control_plane):
+            response = self.client.post(f"/control-plane/tasks/{task_id}/authorize", json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "AUTHORIZED")
+
     def test_private_authorization_rejects_unsafe_actor(self):
         response = self.client.post(
             "/control-plane/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize",

@@ -194,6 +194,13 @@ def authorize_task(task_id):
         task = CONTROL_PLANE.authorize(task_id, actor=f"github-actions:{actor}", approval_binding=approval_binding)
     except TaskNotFound:
         return jsonify(status="BLOCKED", reason="task_not_found"), 404
+    except TaskConflict:
+        # A delivery retry must not demand a second human approval.  It may
+        # only reuse the exact immutable binding already recorded on the task.
+        existing = CONTROL_PLANE.store.get(task_id)
+        if existing.approval_binding == approval_binding and existing.status in {TaskStatus.AUTHORIZED, TaskStatus.EXECUTION_FAILED_RETRYABLE}:
+            return jsonify(status=existing.status.value, task_id=existing.task_id), 200
+        return jsonify(status="BLOCKED", reason="authorization_rejected"), 409
     except (ControlPlaneError, ValueError) as exc:
         logging.warning("CONTROL_PLANE_BLOCKED authorization task=%s reason=%s", task_id, type(exc).__name__)
         return jsonify(status="BLOCKED", reason="authorization_rejected"), 409
