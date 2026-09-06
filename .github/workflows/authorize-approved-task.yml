@@ -57,5 +57,6 @@ jobs:
           response="$(curl --fail --silent --show-error \
             --header "Authorization: Bearer $ID_TOKEN" \
             --header "Content-Type: application/json" \
+            --data '{}' \
             "$ORCHESTRATOR_URL/control-plane/tasks/$TASK_ID/bootstrap")"
           test "$(jq --raw-output '.status' <<<"$response")" = "VERIFIED"
