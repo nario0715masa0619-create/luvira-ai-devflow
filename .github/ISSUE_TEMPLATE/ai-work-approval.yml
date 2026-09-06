@@ -72,6 +72,7 @@ body:
         - read
         - plan
         - comment
+        - implementation
     validations:
       required: true
   - type: input

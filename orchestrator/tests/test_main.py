@@ -249,6 +249,14 @@ read
         self.assertEqual(spec["budget"], {"max_cost_usd": 1.0})
         self.assertEqual(spec["source"]["issue_number"], 31)
 
+    def test_approval_issue_form_preserves_an_explicit_implementation_request(self):
+        payload = self.approval_issue_payload(33)
+        payload["issue"]["body"] = payload["issue"]["body"].replace("\nread\n### 有効期限", "\nimplementation\n### 有効期限")
+        with patch("main.github_default_branch_sha", return_value="f" * 40):
+            spec = main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 33)
+
+        self.assertEqual(spec["requested_action"], "implementation")
+
     def test_approval_issue_form_requires_ai_approval_label(self):
         payload = self.approval_issue_payload(32)
         payload["issue"]["labels"] = []
