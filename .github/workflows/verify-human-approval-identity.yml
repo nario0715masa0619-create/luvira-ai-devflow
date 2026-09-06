@@ -1,0 +1,22 @@
+name: Verify human approval identity
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/authorize-approved-task.yml
+      - .github/workflows/verify-human-approval-identity.yml
+      - security/workload-identity/github-human-approval.json
+      - scripts/verify_human_approval_identity.py
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/verify_human_approval_identity.py

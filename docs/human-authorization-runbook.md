@@ -6,7 +6,9 @@
 
 GitHubのリポジトリ設定で `human-approval` Environment を作成し、required reviewersを設定する。この保護がない状態では `Authorize approved DevFlow task` workflowを実行してはいけない。
 
-このworkflowはGitHub OIDCから、private Cloud Run Control Planeだけを呼び出す。長期鍵、OpenCode Go APIキー、GitHub App秘密鍵をrunnerや入力欄に置かない。
+このworkflowは専用GitHub OIDC providerと専用サービスアカウントから、private Cloud Run Control Planeだけを呼び出す。専用サービスアカウントに与える権限は `roles/run.invoker` のみであり、Cloud Runデプロイ、Secret Manager、GitHub App、AI providerへの権限は与えない。長期鍵、OpenCode Go APIキー、GitHub App秘密鍵をrunnerや入力欄に置かない。
+
+OIDCの信頼条件はリポジトリ、workflow名、`human-approval` Environmentをすべて固定する。対応する契約は `security/workload-identity/github-human-approval.json` に保存し、PRでは `Verify human approval identity` がworkflowとの不整合をfail-closedで止める。
 
 ## 承認する前の確認
 

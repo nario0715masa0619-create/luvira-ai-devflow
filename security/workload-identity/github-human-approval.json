@@ -1,0 +1,11 @@
+{
+  "project_number": "660319628285",
+  "pool_id": "github-actions",
+  "provider_id": "github-human-approval",
+  "service_account": "devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com",
+  "repository": "nario0715masa0619-create/luvira-ai-devflow",
+  "workflow": "Authorize approved DevFlow task",
+  "environment": "human-approval",
+  "cloud_run_service": "luvira-devflow-orchestrator",
+  "role": "roles/run.invoker"
+}
