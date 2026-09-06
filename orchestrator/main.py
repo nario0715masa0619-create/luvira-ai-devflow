@@ -44,8 +44,12 @@ def create_control_plane_from_environment() -> ControlPlane:
 
 
 def initialize_control_plane() -> ControlPlane | None:
-    """Fail Cloud Run startup closed; local and unit-test imports remain inert."""
-    if not os.environ.get("K_SERVICE"):
+    """Initialize durable state only in the private Control Plane service.
+
+    The public ingress validates and forwards signed webhook bytes.  It must not
+    need Firestore configuration or a Firestore-capable identity merely to boot.
+    """
+    if not os.environ.get("K_SERVICE") or PUBLIC_WEBHOOK_INGRESS_ONLY:
         return None
     return create_control_plane_from_environment()
 

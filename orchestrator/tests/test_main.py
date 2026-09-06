@@ -66,6 +66,13 @@ class EventTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "control_plane_backend_must_be_firestore"):
                 main.create_control_plane_from_environment()
 
+    def test_public_ingress_does_not_initialize_the_private_control_plane(self):
+        with patch.dict(os.environ, {"K_SERVICE": "luvira-devflow-github-ingress"}):
+            with patch("main.PUBLIC_WEBHOOK_INGRESS_ONLY", True), patch("main.create_control_plane_from_environment") as create:
+                self.assertIsNone(main.initialize_control_plane())
+
+        create.assert_not_called()
+
     def test_control_plane_readiness_uses_read_only_firestore_probe(self):
         store = unittest.mock.Mock(spec=main.FirestoreTaskStore)
         control_plane = unittest.mock.Mock(store=store)
