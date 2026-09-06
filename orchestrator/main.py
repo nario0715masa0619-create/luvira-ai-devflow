@@ -284,8 +284,13 @@ def register_approval_issue(payload, repository, issue, action):
             task = CONTROL_PLANE.validate(task.task_id, actor="control-plane")
         if task.status is TaskStatus.VALIDATED:
             task = CONTROL_PLANE.request_human_approval(task.task_id, actor="control-plane")
-    except (ControlPlaneError, ValueError):
-        logging.warning("CONTROL_PLANE_BLOCKED invalid approval issue=%s action=%s", issue, action)
+    except (ControlPlaneError, ValueError) as exc:
+        logging.warning(
+            "CONTROL_PLANE_BLOCKED invalid approval issue=%s action=%s reason=%s",
+            issue,
+            action,
+            type(exc).__name__,
+        )
         return jsonify(status="BLOCKED", reason="invalid_approval_issue"), 400
 
     if task.status is not TaskStatus.AWAITING_HUMAN_APPROVAL:

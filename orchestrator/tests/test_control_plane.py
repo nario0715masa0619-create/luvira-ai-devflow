@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import Mock
 
+from google.cloud import firestore
+
 from control_plane import ControlPlane, FirestoreTaskStore, InMemoryTaskStore, TaskConflict, TaskStatus, spec_hash
 
 
@@ -72,7 +74,7 @@ class FirestoreTaskStoreTest(unittest.TestCase):
         self.assertEqual(payload["status"], "DRAFT")
         self.assertEqual(payload["revision"], 1)
 
-    def test_stale_writer_is_rejected_before_transaction_commit(self):
+    def test_stale_writer_is_rejected_before_firestore_update(self):
         task = ControlPlane(InMemoryTaskStore()).create_draft(valid_spec(), "intake", task_id="task-1")
         task.revision = 1
         reference = Mock()
@@ -82,13 +84,25 @@ class FirestoreTaskStoreTest(unittest.TestCase):
         snapshot.to_dict.return_value = newer
         reference.get.return_value = snapshot
         self.collection.document.return_value = reference
-        transaction = Mock()
-        self.client.transaction.return_value = transaction
-
         with self.assertRaisesRegex(TaskConflict, "stale_task_revision"):
             self.store.save(task)
 
-        transaction.commit.assert_not_called()
+        reference.update.assert_not_called()
+
+    def test_save_uses_firestore_update_time_as_an_optimistic_lock(self):
+        task = ControlPlane(InMemoryTaskStore()).create_draft(valid_spec(), "intake", task_id="task-1")
+        reference = Mock()
+        snapshot = Mock(exists=True, update_time=Mock())
+        snapshot.to_dict.return_value = task.storage_dict()
+        reference.get.return_value = snapshot
+        self.collection.document.return_value = reference
+
+        self.store.save(task)
+
+        self.assertEqual(task.revision, 2)
+        payload = reference.update.call_args.args[0]
+        self.assertEqual(payload["revision"], 2)
+        self.assertIsInstance(reference.update.call_args.kwargs["option"], firestore.LastUpdateOption)
 
     def test_readiness_check_is_read_only(self):
         self.collection.limit.return_value.stream.return_value = []

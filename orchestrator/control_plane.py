@@ -16,6 +16,7 @@ import json
 from typing import Any, Protocol
 from uuid import uuid4
 
+from google.cloud import firestore
 from google.api_core.exceptions import AlreadyExists
 
 
@@ -159,8 +160,7 @@ class FirestoreTaskStore:
 
     def save(self, task: TaskRecord) -> None:
         reference = self._collection.document(task.task_id)
-        transaction = self._client.transaction()
-        snapshot = reference.get(transaction=transaction)
+        snapshot = reference.get()
         if not snapshot.exists:
             raise TaskNotFound("task_not_found")
         stored = TaskRecord.from_storage(snapshot.to_dict())
@@ -169,8 +169,9 @@ class FirestoreTaskStore:
         next_revision = task.revision + 1
         payload = task.storage_dict()
         payload["revision"] = next_revision
-        transaction.set(reference, payload)
-        transaction.commit()
+        # Keep the optimistic lock in Firestore itself.  A stale writer cannot
+        # overwrite a transition committed after the read above.
+        reference.update(payload, option=firestore.LastUpdateOption(snapshot.update_time))
         task.revision = next_revision
 
     def readiness_check(self) -> None:
