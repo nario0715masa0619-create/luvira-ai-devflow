@@ -40,6 +40,7 @@ WORKER_JOB = os.environ.get("ISOLATED_WORKER_JOB", "luvira-devflow-isolated-work
 WORKER_REGION = os.environ.get("ISOLATED_WORKER_REGION", "us-central1")
 WORKER_ARTIFACT_BUCKET = os.environ.get("ISOLATED_WORKER_ARTIFACT_BUCKET", "luvira-devflow-bootstrap-results")
 WORKER_ARTIFACT_VIEW = os.environ.get("ISOLATED_WORKER_ARTIFACT_VIEW", "bootstrap-results")
+BOOTSTRAP_CALLER_EMAIL = os.environ.get("BOOTSTRAP_CALLER_EMAIL", "devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com")
 
 
 def create_control_plane_from_environment() -> ControlPlane:
@@ -204,12 +205,16 @@ def run_bootstrap(task_id):
     """Private Broker route: only an already authorized task may start a Worker."""
     if CONTROL_PLANE is None:
         return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
+    if not bootstrap_caller_is_authorized():
+        return jsonify(status="BLOCKED", reason="bootstrap_caller_unauthorized"), 403
     payload = request.get_json(silent=True) or {}
     paths = payload.get("allowed_paths")
-    if not isinstance(paths, list):
+    if not isinstance(paths, list) or not paths or not all(isinstance(path, str) and path.strip() for path in paths):
         return jsonify(status="BLOCKED", reason="allowed_paths_required"), 400
     try:
         task = CONTROL_PLANE.store.get(task_id)
+        if task.status is not TaskStatus.AUTHORIZED:
+            return jsonify(status="BLOCKED", reason="task_not_authorized"), 409
         envelope = ExecutionBroker().prepare(task, paths).public_dict()
         client = CloudRunBootstrapClient(os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"), WORKER_REGION, WORKER_JOB)
         reader = CloudLoggingBootstrapReader(os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"), WORKER_REGION, WORKER_ARTIFACT_BUCKET, WORKER_ARTIFACT_VIEW)
@@ -218,6 +223,19 @@ def run_bootstrap(task_id):
     except (TaskNotFound, ExecutionBrokerError, ExecutionResultAdapterError, CloudRunBootstrapClientError, ValueError):
         return jsonify(status="BLOCKED", reason="bootstrap_execution_rejected"), 409
     return jsonify(status="VERIFIED", task_id=record.artifact.task_id, execution_id=record.execution_id), 200
+
+
+def bootstrap_caller_is_authorized() -> bool:
+    """Require a Google-signed service identity before a Worker may be started."""
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    audience = ORCHESTRATOR_URL or request.url_root.rstrip("/")
+    if not token or not audience:
+        return False
+    try:
+        claims = id_token.verify_oauth2_token(token, GoogleAuthRequest(), audience=audience)
+    except Exception:
+        return False
+    return claims.get("email") == BOOTSTRAP_CALLER_EMAIL and claims.get("email_verified") is True
 
 
 @app.get("/readiness/opencode-go")
