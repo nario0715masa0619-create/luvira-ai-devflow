@@ -83,6 +83,51 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.json["backend"], "firestore")
         store.readiness_check.assert_called_once_with()
 
+    def test_private_authorization_records_a_bound_human_decision_without_starting_a_worker(self):
+        task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
+        approval_binding = "b" * 64
+        task = unittest.mock.Mock(status=main.TaskStatus.AUTHORIZED, task_id=task_id)
+        control_plane = unittest.mock.Mock()
+        control_plane.authorize.return_value = task
+        with patch("main.CONTROL_PLANE", control_plane):
+            response = self.client.post(
+                f"/control-plane/tasks/{task_id}/authorize",
+                json={"approval_binding": approval_binding, "actor": "nario0715masa0619-create"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "AUTHORIZED", "task_id": task_id})
+        control_plane.authorize.assert_called_once_with(
+            task_id, actor="github-actions:nario0715masa0619-create", approval_binding=approval_binding
+        )
+
+    def test_private_authorization_rejects_missing_binding(self):
+        response = self.client.post(
+            "/control-plane/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize",
+            json={"actor": "nario0715masa0619-create"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json["reason"], "approval_binding_required")
+
+    def test_private_authorization_rejects_unsafe_actor(self):
+        response = self.client.post(
+            "/control-plane/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize",
+            json={"approval_binding": "b" * 64, "actor": "not an actor"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json["reason"], "approval_actor_invalid")
+
+    def test_private_authorization_rejects_task_id_outside_control_plane_format(self):
+        response = self.client.post(
+            "/control-plane/tasks/task-26/authorize",
+            json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"},
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json["reason"], "task_id_invalid")
+
     def test_github_worker_readiness_returns_identity_only(self):
         configured = {
             "GITHUB_WORKER_APP_ID": "4823016",

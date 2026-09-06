@@ -1,0 +1,49 @@
+name: Authorize approved DevFlow task
+
+on:
+  workflow_dispatch:
+    inputs:
+      task_id:
+        description: Firestore task ID returned by the approved Issue Form
+        required: true
+        type: string
+      approval_binding:
+        description: Immutable approval binding returned by the Control Plane
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  authorize:
+    # Configure this environment in GitHub with required human reviewers before
+    # running the workflow. The workflow itself never invokes an AI or worker.
+    environment: human-approval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        id: auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-deployer
+          service_account: devflow-deployer@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+          token_format: id_token
+          id_token_audience: https://luvira-devflow-orchestrator-hbnnuiauuq-uc.a.run.app
+          id_token_include_email: true
+      - name: Record the human authorization in the private Control Plane
+        env:
+          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
+          TASK_ID: ${{ inputs.task_id }}
+          APPROVAL_BINDING: ${{ inputs.approval_binding }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          body="$(jq -n --arg approval_binding "$APPROVAL_BINDING" --arg actor "$ACTOR" '{approval_binding: $approval_binding, actor: $actor}')"
+          response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $ID_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data "$body" \
+            "https://luvira-devflow-orchestrator-hbnnuiauuq-uc.a.run.app/control-plane/tasks/$TASK_ID/authorize")"
+          test "$(jq --raw-output '.status' <<<"$response")" = "AUTHORIZED"
