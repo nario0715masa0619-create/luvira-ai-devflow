@@ -91,7 +91,13 @@ def main() -> None:
     envelope = decode_envelope(encoded)
     validate_envelope(envelope)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(build_bootstrap_artifact(envelope), sort_keys=True), encoding="utf-8")
+    artifact = build_bootstrap_artifact(envelope)
+    payload = json.dumps(artifact, sort_keys=True).encode("utf-8")
+    output_path.write_bytes(payload)
+    # This is the only bootstrap transport output. It contains no source code,
+    # credentials, prompt, diff, or publication authority. The Broker reads it
+    # only after the Cloud Run Job reports success.
+    print("LUVIRA_BOOTSTRAP_ARTIFACT_B64=" + base64.b64encode(payload).decode("ascii"))
 
 
 if __name__ == "__main__":
