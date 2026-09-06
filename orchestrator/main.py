@@ -209,21 +209,20 @@ def run_bootstrap(task_id):
         return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
     if not bootstrap_caller_is_authorized():
         return jsonify(status="BLOCKED", reason="bootstrap_caller_unauthorized"), 403
-    payload = request.get_json(silent=True) or {}
-    paths = payload.get("allowed_paths")
-    if not isinstance(paths, list) or not paths or not all(isinstance(path, str) and path.strip() for path in paths):
-        return jsonify(status="BLOCKED", reason="allowed_paths_required"), 400
     try:
-        task = CONTROL_PLANE.store.get(task_id)
-        if task.status is not TaskStatus.AUTHORIZED:
-            return jsonify(status="BLOCKED", reason="task_not_authorized"), 409
-        envelope = ExecutionBroker().prepare(task, paths).public_dict()
+        task = CONTROL_PLANE.start_execution(task_id, actor="github-actions:human-approval")
+        envelope = ExecutionBroker().prepare(task).public_dict()
         client = CloudRunBootstrapClient(os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"), WORKER_REGION, WORKER_JOB)
         reader = CloudLoggingBootstrapReader(os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"), WORKER_REGION, WORKER_ARTIFACT_BUCKET, WORKER_ARTIFACT_VIEW)
         handoff = ArtifactHandoff(FirestoreVerifiedArtifactStore(firestore.Client()))
         record = BootstrapResultAdapter(client, reader, handoff).execute_and_verify(envelope)
-    except (TaskNotFound, ExecutionBrokerError, ExecutionResultAdapterError, CloudRunBootstrapClientError, ValueError):
-        return jsonify(status="BLOCKED", reason="bootstrap_execution_rejected"), 409
+    except (TaskNotFound, ExecutionBrokerError, ExecutionResultAdapterError, CloudRunBootstrapClientError, ValueError) as exc:
+        try:
+            CONTROL_PLANE.fail_execution(task_id, actor="broker", reason=type(exc).__name__)
+        except (ControlPlaneError, TaskNotFound):
+            pass
+        return jsonify(status="RETRYABLE_FAILURE", reason="bootstrap_execution_rejected"), 409
+    CONTROL_PLANE.complete_execution(task_id, actor="broker", execution_id=record.execution_id)
     return jsonify(status="VERIFIED", task_id=record.artifact.task_id, execution_id=record.execution_id), 200
 
 
@@ -401,6 +400,7 @@ def approval_issue_spec(payload, repository, issue_number):
     form = {label: issue_form_value(body, label) for label in (
         "Project ID", "Repository", "承認すること", "タスク種別", "受入条件",
         "最大コスト（USD）", "影響", "しないこと", "許可を求める最初のアクション", "有効期限（UTC）",
+        "許可するリポジトリ内パス",
     )}
     if form["Repository"] != repository:
         raise ValueError("repository_form_mismatch")
@@ -411,6 +411,10 @@ def approval_issue_spec(payload, repository, issue_number):
         raise ValueError("invalid_max_cost_usd") from exc
     if not criteria or max_cost_usd <= 0:
         raise ValueError("invalid_approval_form")
+    try:
+        allowed_paths = json.loads(form["許可するリポジトリ内パス"])
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("invalid_execution_scope") from exc
     return {
         "project_id": form["Project ID"],
         "repository": repository,
@@ -422,6 +426,7 @@ def approval_issue_spec(payload, repository, issue_number):
         "approval": form["承認すること"],
         "impact": form["影響"],
         "excluded": form["しないこと"],
+        "execution_scope": {"allowed_paths": allowed_paths},
         "expiry": form["有効期限（UTC）"],
         "source": {"issue_number": issue_number, "issue_node_id": issue.get("node_id")},
     }

@@ -17,10 +17,6 @@ on:
         description: Immutable approval binding returned by the Control Plane
         required: true
         type: string
-      allowed_paths:
-        description: JSON array of repository-relative paths explicitly approved for this task, for example ["README.md"]
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -49,7 +45,6 @@ jobs:
           TASK_ID: ${{ inputs.task_id }}
           APPROVAL_BINDING: ${{ inputs.approval_binding }}
           ACTOR: ${{ github.actor }}
-          ALLOWED_PATHS: ${{ inputs.allowed_paths }}
         run: |
           set -euo pipefail
           body="$(jq -n --arg approval_binding "$APPROVAL_BINDING" --arg actor "$ACTOR" '{approval_binding: $approval_binding, actor: $actor}')"
@@ -59,10 +54,8 @@ jobs:
             --data "$body" \
             "$ORCHESTRATOR_URL/control-plane/tasks/$TASK_ID/authorize")"
           test "$(jq --raw-output '.status' <<<"$response")" = "AUTHORIZED"
-          jq --exit-status 'type == "array" and length > 0 and all(.[]; type == "string" and length > 0)' <<<"$ALLOWED_PATHS" >/dev/null
           response="$(curl --fail --silent --show-error \
             --header "Authorization: Bearer $ID_TOKEN" \
             --header "Content-Type: application/json" \
-            --data "$(jq --compact-output --argjson allowed_paths "$ALLOWED_PATHS" '{allowed_paths: $allowed_paths}')" \
             "$ORCHESTRATOR_URL/control-plane/tasks/$TASK_ID/bootstrap")"
           test "$(jq --raw-output '.status' <<<"$response")" = "VERIFIED"

@@ -25,6 +25,9 @@ class TaskStatus(str, Enum):
     VALIDATED = "VALIDATED"
     AWAITING_HUMAN_APPROVAL = "AWAITING_HUMAN_APPROVAL"
     AUTHORIZED = "AUTHORIZED"
+    EXECUTION_RUNNING = "EXECUTION_RUNNING"
+    EXECUTION_FAILED_RETRYABLE = "EXECUTION_FAILED_RETRYABLE"
+    VERIFIED = "VERIFIED"
     REJECTED = "REJECTED"
 
 
@@ -66,6 +69,9 @@ class TaskRecord:
     approval_binding: str | None = None
     approved_by: str | None = None
     approved_at: str | None = None
+    execution_attempts: int = 0
+    execution_id: str | None = None
+    last_execution_error: str | None = None
     audit_events: list[AuditEvent] = field(default_factory=list)
     revision: int = 1
 
@@ -85,6 +91,9 @@ class TaskRecord:
             "approval_binding": self.approval_binding,
             "approved_by": self.approved_by,
             "approved_at": self.approved_at,
+            "execution_attempts": self.execution_attempts,
+            "execution_id": self.execution_id,
+            "last_execution_error": self.last_execution_error,
             "audit_events": [asdict(event) for event in self.audit_events],
             "revision": self.revision,
         }
@@ -101,6 +110,9 @@ class TaskRecord:
                 approval_binding=value.get("approval_binding"),
                 approved_by=value.get("approved_by"),
                 approved_at=value.get("approved_at"),
+                execution_attempts=value.get("execution_attempts", 0),
+                execution_id=value.get("execution_id"),
+                last_execution_error=value.get("last_execution_error"),
                 audit_events=[AuditEvent(**event) for event in value.get("audit_events", [])],
                 revision=value["revision"],
             )
@@ -250,6 +262,38 @@ class ControlPlane:
         self.store.save(task)
         return task
 
+    def start_execution(self, task_id: str, actor: str) -> TaskRecord:
+        task = self.store.get(task_id)
+        if task.status not in {TaskStatus.AUTHORIZED, TaskStatus.EXECUTION_FAILED_RETRYABLE}:
+            raise TaskConflict(f"execution_not_startable_from_{task.status.value}")
+        task.status = TaskStatus.EXECUTION_RUNNING
+        task.execution_attempts += 1
+        task.execution_id = None
+        task.last_execution_error = None
+        self._audit(task, "EXECUTION_STARTED", actor, {"attempt": task.execution_attempts})
+        self.store.save(task)
+        return task
+
+    def complete_execution(self, task_id: str, actor: str, execution_id: str) -> TaskRecord:
+        task = self.store.get(task_id)
+        self._require_state(task, TaskStatus.EXECUTION_RUNNING)
+        if not execution_id:
+            raise TaskConflict("execution_id_required")
+        task.status = TaskStatus.VERIFIED
+        task.execution_id = execution_id
+        self._audit(task, "EXECUTION_VERIFIED", actor, {"execution_id": execution_id})
+        self.store.save(task)
+        return task
+
+    def fail_execution(self, task_id: str, actor: str, reason: str) -> TaskRecord:
+        task = self.store.get(task_id)
+        self._require_state(task, TaskStatus.EXECUTION_RUNNING)
+        task.status = TaskStatus.EXECUTION_FAILED_RETRYABLE
+        task.last_execution_error = reason
+        self._audit(task, "EXECUTION_FAILED_RETRYABLE", actor, {"reason": reason, "attempt": task.execution_attempts})
+        self.store.save(task)
+        return task
+
     @staticmethod
     def _validation_errors(spec: dict[str, Any]) -> list[str]:
         errors: list[str] = []
@@ -265,6 +309,10 @@ class ControlPlane:
         budget = spec.get("budget")
         if not isinstance(budget, dict) or not isinstance(budget.get("max_cost_usd"), (int, float)) or budget["max_cost_usd"] <= 0:
             errors.append("positive_budget_required")
+        scope = spec.get("execution_scope")
+        paths = scope.get("allowed_paths") if isinstance(scope, dict) else None
+        if not isinstance(paths, list) or not paths or not all(isinstance(path, str) and path.strip() and not path.startswith("/") and ".." not in path.split("/") for path in paths):
+            errors.append("execution_scope_required")
         return errors
 
     @staticmethod

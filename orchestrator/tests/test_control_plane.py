@@ -13,6 +13,7 @@ def valid_spec():
         "task_type": "implementation",
         "acceptance_criteria": ["tests pass"],
         "budget": {"max_cost_usd": 2},
+        "execution_scope": {"allowed_paths": ["src/"]},
     }
 
 
@@ -45,6 +46,20 @@ class ControlPlaneTest(unittest.TestCase):
         task.spec["base_commit"] = "changed"
         with self.assertRaisesRegex(TaskConflict, "task_snapshot_changed"):
             self.control_plane.authorize(task.task_id, "human@example.test", waiting.approval_binding)
+
+    def test_execution_failure_is_retryable_without_reusing_human_approval(self):
+        task = self.control_plane.create_draft(valid_spec(), "intake")
+        self.control_plane.validate(task.task_id, "validator")
+        waiting = self.control_plane.request_human_approval(task.task_id, "governance")
+        self.control_plane.authorize(task.task_id, "human@example.test", waiting.approval_binding)
+        running = self.control_plane.start_execution(task.task_id, "broker")
+        self.assertEqual(running.status, TaskStatus.EXECUTION_RUNNING)
+        failed = self.control_plane.fail_execution(task.task_id, "broker", "transport_error")
+
+        self.assertEqual(failed.status, TaskStatus.EXECUTION_FAILED_RETRYABLE)
+        retry = self.control_plane.start_execution(task.task_id, "broker")
+        self.assertEqual(retry.status, TaskStatus.EXECUTION_RUNNING)
+        self.assertEqual(retry.execution_attempts, 2)
 
     def test_duplicate_task_id_and_impossible_transition_are_rejected(self):
         task = self.control_plane.create_draft(valid_spec(), "intake", task_id="task-1")
