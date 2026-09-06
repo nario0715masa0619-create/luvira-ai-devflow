@@ -1,4 +1,6 @@
 import base64
+import contextlib
+import io
 import json
 import tempfile
 import unittest
@@ -29,13 +31,14 @@ class IsolatedWorkerTest(unittest.TestCase):
         encoded = base64.b64encode(json.dumps(envelope).encode()).decode()
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "result.json"
-            with patch.dict("os.environ", {"WORKER_ENVELOPE_B64": encoded, "WORKER_OUTPUT_PATH": str(output)}, clear=True):
+            with patch.dict("os.environ", {"WORKER_ENVELOPE_B64": encoded, "WORKER_OUTPUT_PATH": str(output)}, clear=True), contextlib.redirect_stdout(io.StringIO()) as stdout:
                 isolated_worker.main()
             artifact = json.loads(output.read_text(encoding="utf-8"))
 
         self.assertEqual(artifact["status"], "ENVELOPE_VALIDATED_NO_MODEL_EXECUTION")
         self.assertEqual(artifact["changed_paths"], [])
         self.assertEqual(artifact["publication"], "none")
+        self.assertTrue(stdout.getvalue().startswith("LUVIRA_BOOTSTRAP_ARTIFACT_B64="))
 
     def test_rejects_extra_credential_material(self):
         envelope = valid_envelope()

@@ -35,3 +35,7 @@ WorkerにはArtifact保管先への書き込み権限を渡さない。したが
 次の接続段階では、Brokerが一回限りの実行結果を回収し、VerifierだけにArtifactを提示する。`artifact_handoff.py` は実行IDごとに受領を一回へ固定し、同一出力を含む再送も拒否する。Verifierは `artifact_verifier.py` の検査を通過するまで保存・公開・次工程への送付を一切行わない。現在のbootstrap Artifactは実行境界の確認専用であり、コード変更やPR作成を許可しない。
 
 Cloud Runからの実際の結果取得は、次段階でBrokerの専用Execution Adapterに限定する。このAdapterだけがJobの完了状態と短命な結果を読める。WorkerがBrokerへHTTP投稿したり、Artifact保管先の資格情報を受け取ったりする経路は作らない。
+
+bootstrap Jobは、変更・ソースコード・プロンプト・資格情報を含まない検証Artifactだけを、固定prefix付きの標準出力一行として出す。BrokerのExecution AdapterはJob成功を確認した後に限り、その一行を取得してVerifierへ渡す。出力が0行または複数行、base64不正、またはVerifier不合格なら保存しない。
+
+実環境への接続時は、Brokerに対象Jobの起動・状態参照と、専用ログ保管先の読み取りだけを与える。Workerサービスアカウントへの追加権限は不要である。実装Artifact（差分を含むもの）はログ経路を使用せず、Phase 3で別途設計・独立レビューする。
