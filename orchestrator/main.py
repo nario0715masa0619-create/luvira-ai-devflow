@@ -16,6 +16,10 @@ from google.cloud import firestore
 from google.oauth2 import id_token
 
 from control_plane import ControlPlane, ControlPlaneError, FirestoreTaskStore, TaskConflict, TaskNotFound, TaskStatus, spec_hash
+from execution_broker import ExecutionBroker, ExecutionBrokerError
+from artifact_handoff import ArtifactHandoff, FirestoreVerifiedArtifactStore
+from execution_result_adapter import BootstrapResultAdapter, ExecutionResultAdapterError
+from cloud_run_bootstrap_client import CloudLoggingBootstrapReader, CloudRunBootstrapClient, CloudRunBootstrapClientError
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -32,6 +36,10 @@ PUBLIC_WEBHOOK_INGRESS_ONLY = os.environ.get("PUBLIC_WEBHOOK_INGRESS_ONLY", "").
 ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "").rstrip("/")
 TASK_STORE_BACKEND = os.environ.get("TASK_STORE_BACKEND", "").strip().lower()
 FIRESTORE_TASK_COLLECTION = os.environ.get("FIRESTORE_TASK_COLLECTION", "").strip()
+WORKER_JOB = os.environ.get("ISOLATED_WORKER_JOB", "luvira-devflow-isolated-worker-bootstrap")
+WORKER_REGION = os.environ.get("ISOLATED_WORKER_REGION", "us-central1")
+WORKER_ARTIFACT_BUCKET = os.environ.get("ISOLATED_WORKER_ARTIFACT_BUCKET", "luvira-devflow-bootstrap-results")
+WORKER_ARTIFACT_VIEW = os.environ.get("ISOLATED_WORKER_ARTIFACT_VIEW", "bootstrap-results")
 
 
 def create_control_plane_from_environment() -> ControlPlane:
@@ -189,6 +197,27 @@ def authorize_task(task_id):
 
     logging.info("CONTROL_PLANE_AUTHORIZED task=%s actor=%s", task.task_id, actor)
     return jsonify(status=task.status.value, task_id=task.task_id), 200
+
+
+@app.post("/control-plane/tasks/<task_id>/bootstrap")
+def run_bootstrap(task_id):
+    """Private Broker route: only an already authorized task may start a Worker."""
+    if CONTROL_PLANE is None:
+        return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
+    payload = request.get_json(silent=True) or {}
+    paths = payload.get("allowed_paths")
+    if not isinstance(paths, list):
+        return jsonify(status="BLOCKED", reason="allowed_paths_required"), 400
+    try:
+        task = CONTROL_PLANE.store.get(task_id)
+        envelope = ExecutionBroker().prepare(task, paths).public_dict()
+        client = CloudRunBootstrapClient(os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"), WORKER_REGION, WORKER_JOB)
+        reader = CloudLoggingBootstrapReader(os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"), WORKER_REGION, WORKER_ARTIFACT_BUCKET, WORKER_ARTIFACT_VIEW)
+        handoff = ArtifactHandoff(FirestoreVerifiedArtifactStore(firestore.Client()))
+        record = BootstrapResultAdapter(client, reader, handoff).execute_and_verify(envelope)
+    except (TaskNotFound, ExecutionBrokerError, ExecutionResultAdapterError, CloudRunBootstrapClientError, ValueError):
+        return jsonify(status="BLOCKED", reason="bootstrap_execution_rejected"), 409
+    return jsonify(status="VERIFIED", task_id=record.artifact.task_id, execution_id=record.execution_id), 200
 
 
 @app.get("/readiness/opencode-go")
