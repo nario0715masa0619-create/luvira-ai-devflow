@@ -12,6 +12,7 @@ import hashlib
 import re
 from dataclasses import dataclass
 from typing import Protocol
+from google.api_core.exceptions import AlreadyExists
 
 from artifact_verifier import ArtifactVerificationError, VerifiedArtifact, verify_artifact
 
@@ -46,6 +47,31 @@ class InMemoryVerifiedArtifactStore:
         if record.execution_id in self.records:
             raise ArtifactHandoffError("artifact_execution_already_received")
         self.records[record.execution_id] = record
+
+
+class FirestoreVerifiedArtifactStore:
+    """Durable, create-only result store; duplicate executions fail closed."""
+
+    def __init__(self, client, collection: str = "devflow_verified_artifacts"):
+        self._collection = client.collection(collection)
+
+    def put_once(self, record: VerifiedArtifactRecord) -> None:
+        payload = {
+            "execution_id": record.execution_id,
+            "artifact_sha256": record.artifact_sha256,
+            "artifact": {
+                "task_id": record.artifact.task_id,
+                "spec_hash": record.artifact.spec_hash,
+                "base_commit": record.artifact.base_commit,
+                "status": record.artifact.status,
+                "changed_paths": list(record.artifact.changed_paths),
+                "tests": list(record.artifact.tests),
+            },
+        }
+        try:
+            self._collection.document(record.execution_id).create(payload)
+        except AlreadyExists as exc:
+            raise ArtifactHandoffError("artifact_execution_already_received") from exc
 
 
 class ArtifactHandoff:
