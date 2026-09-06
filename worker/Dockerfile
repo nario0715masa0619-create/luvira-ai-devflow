@@ -1,4 +1,4 @@
-FROM python:3.12-slim@sha256:0301f4e34fbcb5b071ab58b68d46be37dc5cb6f6e5068830fd5034aef4a82c61
+FROM python:3.12-slim@sha256:78387bc3881b8273120a12ebe6c1ab22b018ccc2c9adf565ae1ac9b536e184ea
 
 WORKDIR /workspace
 COPY orchestrator/isolated_worker.py /app/isolated_worker.py
