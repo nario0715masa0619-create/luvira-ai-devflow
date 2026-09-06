@@ -229,6 +229,9 @@ Read only
 ### しないこと
 
 No writes
+### 許可するリポジトリ内パス
+
+["README.md"]
 ### 許可を求める最初のアクション
 
 read

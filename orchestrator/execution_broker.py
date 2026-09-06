@@ -55,13 +55,14 @@ class WorkerEnvelope:
 class ExecutionBroker:
     """Prepare only a bounded, credential-free execution envelope."""
 
-    def prepare(self, task: TaskRecord, allowed_paths: Iterable[str]) -> WorkerEnvelope:
-        if task.status is not TaskStatus.AUTHORIZED:
+    def prepare(self, task: TaskRecord) -> WorkerEnvelope:
+        if task.status is not TaskStatus.EXECUTION_RUNNING:
             raise ExecutionBrokerError("task_not_authorized")
         if task.spec.get("requested_action") != "implementation":
             raise ExecutionBrokerError("requested_action_not_implementation")
 
-        paths = tuple(self._validate_paths(allowed_paths))
+        scope = task.spec.get("execution_scope") or {}
+        paths = tuple(self._validate_paths(scope.get("allowed_paths", [])))
         criteria = task.spec.get("acceptance_criteria")
         budget = task.spec.get("budget") or {}
         if not isinstance(criteria, list) or not criteria:
