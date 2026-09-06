@@ -25,5 +25,11 @@ Workerが返せるものは、許可パスに限定された差分と検証結�
 1. 専用の無権限Workerサービスアカウントと、読み取り専用Verifier用のprivate Artifact保管先を作成する。\n   **完了:** WorkerとVerifierはプロジェクト全体の権限を持たず、Artifact保管先は公開アクセス防止・均一アクセスを有効化する。
 2. Worker Jobのbootstrap imageを用意する。\n   **完了:** Envelope以外の入力を拒否し、モデル実行なしの検証Artifactだけを生成する。
 3. Brokerだけが短期入力を渡すCloud Run Jobを起動する。
-4. 受領した差分をVerification Planeが許可パス・秘密情報・生成物・テスト結果でfail-closed検査する。
+4. **完了:** Verification Planeは、Brokerが発行した元のEnvelopeと照合し、Worker出力を未信頼のbytesとしてfail-closed検査する。bootstrap段階では、タスクID・仕様hash・base commitが完全一致し、変更・テスト結果・公開指示がすべて空のArtifactしか受理しない。重複JSONキー、余分なフィールド、別taskの出力も拒否する。
 5. Phase 3でのみ、独立レビュー通過済みArtifactをPublication Adapterへ渡す。
+
+## Artifactの受け渡し境界
+
+WorkerにはArtifact保管先への書き込み権限を渡さない。したがって、Cloud Storageへ直接アップロードする実装や、Workerへ長期APIキー・GitHub token・GCP資格情報を渡す実装は採用しない。
+
+次の接続段階では、Brokerが一回限りの実行結果を回収し、VerifierだけにArtifactを提示する。Verifierは `artifact_verifier.py` の検査を通過するまで保存・公開・次工程への送付を一切行わない。現在のbootstrap Artifactは実行境界の確認専用であり、コード変更やPR作成を許可しない。
