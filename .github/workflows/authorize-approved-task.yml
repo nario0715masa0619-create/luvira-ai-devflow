@@ -1,5 +1,11 @@
 name: Authorize approved DevFlow task
 
+env:
+  # Use Cloud Run's canonical service URL for both the ID-token audience and
+  # request host.  Revision aliases are accepted by Cloud Run IAM but are not
+  # a stable application-level audience.
+  ORCHESTRATOR_URL: https://luvira-devflow-orchestrator-660319628285.us-central1.run.app
+
 on:
   workflow_dispatch:
     inputs:
@@ -35,7 +41,7 @@ jobs:
           service_account: devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com
           audience: https://github.com/nario0715masa0619-create
           token_format: id_token
-          id_token_audience: https://luvira-devflow-orchestrator-hbnnuiauuq-uc.a.run.app
+          id_token_audience: ${{ env.ORCHESTRATOR_URL }}
           id_token_include_email: true
       - name: Record the human authorization in the private Control Plane
         env:
@@ -51,12 +57,12 @@ jobs:
             --header "Authorization: Bearer $ID_TOKEN" \
             --header "Content-Type: application/json" \
             --data "$body" \
-            "https://luvira-devflow-orchestrator-hbnnuiauuq-uc.a.run.app/control-plane/tasks/$TASK_ID/authorize")"
+            "$ORCHESTRATOR_URL/control-plane/tasks/$TASK_ID/authorize")"
           test "$(jq --raw-output '.status' <<<"$response")" = "AUTHORIZED"
           jq --exit-status 'type == "array" and length > 0 and all(.[]; type == "string" and length > 0)' <<<"$ALLOWED_PATHS" >/dev/null
           response="$(curl --fail --silent --show-error \
             --header "Authorization: Bearer $ID_TOKEN" \
             --header "Content-Type: application/json" \
             --data "$(jq --compact-output --argjson allowed_paths "$ALLOWED_PATHS" '{allowed_paths: $allowed_paths}')" \
-            "https://luvira-devflow-orchestrator-hbnnuiauuq-uc.a.run.app/control-plane/tasks/$TASK_ID/bootstrap")"
+            "$ORCHESTRATOR_URL/control-plane/tasks/$TASK_ID/bootstrap")"
           test "$(jq --raw-output '.status' <<<"$response")" = "VERIFIED"
