@@ -15,7 +15,7 @@ from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import firestore
 from google.oauth2 import id_token
 
-from control_plane import ControlPlane, ControlPlaneError, FirestoreTaskStore, TaskConflict, TaskStatus, spec_hash
+from control_plane import ControlPlane, ControlPlaneError, FirestoreTaskStore, TaskConflict, TaskNotFound, TaskStatus, spec_hash
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -154,6 +154,41 @@ def control_plane_readiness():
         logging.warning("CONTROL_PLANE_BLOCKED Firestore readiness check failed")
         return jsonify(status="BLOCKED", reason="control_plane_unavailable"), 503
     return jsonify(status="READY", backend="firestore", collection=FIRESTORE_TASK_COLLECTION)
+
+
+@app.post("/control-plane/tasks/<task_id>/authorize")
+def authorize_task(task_id):
+    """Record a manual GitHub approval; this endpoint never starts a worker.
+
+    Cloud Run IAM keeps this route private. The only intended caller is the
+    dedicated, manually dispatched GitHub Actions approval workflow. Its
+    protected GitHub Environment is the human gate; the binding prevents a
+    decision for one immutable task snapshot from being reused for another.
+    """
+    payload = request.get_json(silent=True) or {}
+    approval_binding = payload.get("approval_binding")
+    actor = payload.get("actor")
+    if not re.fullmatch(r"github-issue-[1-9][0-9]*-[0-9a-f]{16}", task_id):
+        return jsonify(status="BLOCKED", reason="task_id_invalid"), 400
+    if not isinstance(approval_binding, str) or not re.fullmatch(r"[0-9a-f]{64}", approval_binding):
+        return jsonify(status="BLOCKED", reason="approval_binding_required"), 400
+    if not isinstance(actor, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}", actor):
+        return jsonify(status="BLOCKED", reason="approval_actor_invalid"), 400
+
+    if CONTROL_PLANE is None:
+        logging.error("CONTROL_PLANE_BLOCKED durable store is not initialized")
+        return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
+
+    try:
+        task = CONTROL_PLANE.authorize(task_id, actor=f"github-actions:{actor}", approval_binding=approval_binding)
+    except TaskNotFound:
+        return jsonify(status="BLOCKED", reason="task_not_found"), 404
+    except (ControlPlaneError, ValueError) as exc:
+        logging.warning("CONTROL_PLANE_BLOCKED authorization task=%s reason=%s", task_id, type(exc).__name__)
+        return jsonify(status="BLOCKED", reason="authorization_rejected"), 409
+
+    logging.info("CONTROL_PLANE_AUTHORIZED task=%s actor=%s", task.task_id, actor)
+    return jsonify(status=task.status.value, task_id=task.task_id), 200
 
 
 @app.get("/readiness/opencode-go")
