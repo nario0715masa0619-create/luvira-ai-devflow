@@ -1,5 +1,7 @@
 # Luvira AI DevFlow アーキテクチャ再設計 v2
 
+> 実行ライフサイクル、失敗分類、実行前診断、および移行の停止条件は、[Execution Platform v3](execution-platform-v3.md) を実装上の正本とする。この文書は全体構成と長期方針を定義する。
+
 ## 決定
 
 現行の「Issue コメント → 単一 GitHub Actions → AI 実行・Git 操作・PR 作成」の経路を段階的に廃止する。Issue は依頼の入口に限定し、承認・実行・品質判定・公開を分離する。
