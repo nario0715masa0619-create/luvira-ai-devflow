@@ -32,4 +32,6 @@ Workerが返せるものは、許可パスに限定された差分と検証結�
 
 WorkerにはArtifact保管先への書き込み権限を渡さない。したがって、Cloud Storageへ直接アップロードする実装や、Workerへ長期APIキー・GitHub token・GCP資格情報を渡す実装は採用しない。
 
-次の接続段階では、Brokerが一回限りの実行結果を回収し、VerifierだけにArtifactを提示する。Verifierは `artifact_verifier.py` の検査を通過するまで保存・公開・次工程への送付を一切行わない。現在のbootstrap Artifactは実行境界の確認専用であり、コード変更やPR作成を許可しない。
+次の接続段階では、Brokerが一回限りの実行結果を回収し、VerifierだけにArtifactを提示する。`artifact_handoff.py` は実行IDごとに受領を一回へ固定し、同一出力を含む再送も拒否する。Verifierは `artifact_verifier.py` の検査を通過するまで保存・公開・次工程への送付を一切行わない。現在のbootstrap Artifactは実行境界の確認専用であり、コード変更やPR作成を許可しない。
+
+Cloud Runからの実際の結果取得は、次段階でBrokerの専用Execution Adapterに限定する。このAdapterだけがJobの完了状態と短命な結果を読める。WorkerがBrokerへHTTP投稿したり、Artifact保管先の資格情報を受け取ったりする経路は作らない。
