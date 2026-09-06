@@ -22,7 +22,8 @@ Workerが返せるものは、許可パスに限定された差分と検証結�
 
 ## 次の段階
 
-1. 専用の無権限Workerサービスアカウントと、出力専用の検証Artifact保管先を作成する。
-2. Brokerだけが短期入力を渡すCloud Run Jobを起動する。
-3. 受領した差分をVerification Planeが許可パス・秘密情報・生成物・テスト結果でfail-closed検査する。
-4. Phase 3でのみ、独立レビュー通過済みArtifactをPublication Adapterへ渡す。
+1. 専用の無権限Workerサービスアカウントと、読み取り専用Verifier用のprivate Artifact保管先を作成する。\n   **完了:** WorkerとVerifierはプロジェクト全体の権限を持たず、Artifact保管先は公開アクセス防止・均一アクセスを有効化する。
+2. Worker Jobのbootstrap imageを用意する。\n   **完了:** Envelope以外の入力を拒否し、モデル実行なしの検証Artifactだけを生成する。
+3. Brokerだけが短期入力を渡すCloud Run Jobを起動する。
+4. 受領した差分をVerification Planeが許可パス・秘密情報・生成物・テスト結果でfail-closed検査する。
+5. Phase 3でのみ、独立レビュー通過済みArtifactをPublication Adapterへ渡す。
