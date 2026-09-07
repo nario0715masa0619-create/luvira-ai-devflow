@@ -48,8 +48,16 @@ class V3ControlPlane:
             task = platform.create(spec, task_id=task_id)
             platform.validate(task_id)
             platform.request_approval(task_id)
-            self.tasks.create(task)
-            return task
+            try:
+                self.tasks.create(task)
+                return task
+            except Exception as create_error:
+                # GitHub can deliver `opened` and `labeled` concurrently. A
+                # duplicate document means another delivery won the atomic
+                # create; reload it and apply the same immutable comparison.
+                if str(create_error) != "v3_task_exists":
+                    raise V3ControlPlaneError("task_store_unavailable") from create_error
+                task = self.tasks.get(task_id)
 
         # A webhook delivery is idempotent only for exactly the same immutable
         # document.  A changed Issue Form must produce a new task/approval.
