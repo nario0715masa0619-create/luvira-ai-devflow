@@ -386,7 +386,7 @@ def approval_issue_spec(payload, repository, issue_number):
         "requested_action": form["許可を求める最初のアクション"],
         "execution_scope": {"allowed_paths": allowed_paths},
         "expiry": form["有効期限（UTC）"],
-        "model_policy": "low-cost-first:" + ",".join(RUNNER_ORDER),
+        "model_policy": "none" if form["タスク種別"] == "validation" else "low-cost-first:" + ",".join(RUNNER_ORDER),
         "approval_context": {
             "project_id": form["Project ID"], "task_type": form["タスク種別"],
             "approval": form["承認すること"], "impact": form["影響"],

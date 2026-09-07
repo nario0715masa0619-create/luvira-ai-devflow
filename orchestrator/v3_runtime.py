@@ -61,6 +61,11 @@ def create_v3_queue_service(
         return PreflightCheck("ARTIFACT_BOUNDARY", bool(available), "OK" if available else "ARTIFACT_BOUNDARY_UNAVAILABLE")
 
     def provider_check(_spec):
+        # A validation-only task has an explicit `none` model policy.  It is
+        # still subject to every infrastructure preflight check, but it must
+        # not require an AI provider that it is forbidden to call.
+        if _spec.model_policy == "none":
+            return PreflightCheck("PROVIDER_AVAILABILITY", True, "NOT_REQUIRED")
         try:
             available = provider_available()
         except Exception:
