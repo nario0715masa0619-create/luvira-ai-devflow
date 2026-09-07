@@ -21,6 +21,7 @@ from artifact_handoff import ArtifactHandoff, FirestoreVerifiedArtifactStore
 from execution_result_adapter import BootstrapResultAdapter, ExecutionResultAdapterError
 from cloud_run_bootstrap_client import CloudLoggingBootstrapReader, CloudRunBootstrapClient, CloudRunBootstrapClientError
 from durable_queue_service import DurableQueueRejected
+from v3_runtime import create_v3_queue_service
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -37,6 +38,9 @@ PUBLIC_WEBHOOK_INGRESS_ONLY = os.environ.get("PUBLIC_WEBHOOK_INGRESS_ONLY", "").
 ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "").rstrip("/")
 TASK_STORE_BACKEND = os.environ.get("TASK_STORE_BACKEND", "").strip().lower()
 FIRESTORE_TASK_COLLECTION = os.environ.get("FIRESTORE_TASK_COLLECTION", "").strip()
+V3_TASK_COLLECTION = os.environ.get("V3_TASK_COLLECTION", "").strip()
+V3_RECORD_COLLECTION = os.environ.get("V3_RECORD_COLLECTION", "").strip()
+BROKER_SERVICE_ACCOUNT = os.environ.get("BROKER_SERVICE_ACCOUNT", "").strip()
 WORKER_JOB = os.environ.get("ISOLATED_WORKER_JOB", "luvira-devflow-isolated-worker-bootstrap")
 WORKER_REGION = os.environ.get("ISOLATED_WORKER_REGION", "us-central1")
 WORKER_ARTIFACT_BUCKET = os.environ.get("ISOLATED_WORKER_ARTIFACT_BUCKET", "luvira-devflow-bootstrap-results")
@@ -70,7 +74,24 @@ CONTROL_PLANE = initialize_control_plane()
 # v3 queue wiring is supplied only by the private runtime composition.  An
 # absent service fails closed; this module never falls back to the retired
 # synchronous bootstrap route.
-V3_QUEUE_SERVICE = None
+def create_v3_queue_from_environment():
+    if not os.environ.get("K_SERVICE") or PUBLIC_WEBHOOK_INGRESS_ONLY:
+        return None
+    if not all((V3_TASK_COLLECTION, V3_RECORD_COLLECTION, BROKER_SERVICE_ACCOUNT)):
+        return None
+    return create_v3_queue_service(
+        project=os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"),
+        region=WORKER_REGION,
+        worker_job=WORKER_JOB,
+        broker_service_account=BROKER_SERVICE_ACCOUNT,
+        task_collection=V3_TASK_COLLECTION,
+        record_collection=V3_RECORD_COLLECTION,
+        artifact_boundary_available=lambda: bool(WORKER_ARTIFACT_BUCKET and WORKER_ARTIFACT_VIEW),
+        provider_available=lambda: bool(os.environ.get("OPENCODE_GO_API_KEY")) and opencode_go_model_count(os.environ["OPENCODE_GO_API_KEY"]) > 0,
+    )
+
+
+V3_QUEUE_SERVICE = create_v3_queue_from_environment()
 
 
 @app.before_request
