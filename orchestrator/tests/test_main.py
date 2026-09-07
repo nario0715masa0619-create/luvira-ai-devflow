@@ -89,7 +89,7 @@ class EventTest(unittest.TestCase):
         task = unittest.mock.Mock(status=main.TaskStatus.AUTHORIZED, task_id=task_id)
         control_plane = unittest.mock.Mock()
         control_plane.authorize.return_value = task
-        with patch("main.CONTROL_PLANE", control_plane):
+        with patch("main.CONTROL_PLANE", control_plane), patch("main.V3_TASK_STORE", unittest.mock.Mock()), patch("main.ensure_projected"):
             response = self.client.post(
                 f"/control-plane/tasks/{task_id}/authorize",
                 json={"approval_binding": approval_binding, "actor": "nario0715masa0619-create"},
@@ -116,7 +116,7 @@ class EventTest(unittest.TestCase):
         control_plane = unittest.mock.Mock()
         control_plane.authorize.side_effect = main.TaskConflict("invalid_transition")
         control_plane.store.get.return_value = existing
-        with patch("main.CONTROL_PLANE", control_plane):
+        with patch("main.CONTROL_PLANE", control_plane), patch("main.V3_TASK_STORE", unittest.mock.Mock()), patch("main.ensure_projected"):
             response = self.client.post(f"/control-plane/tasks/{task_id}/authorize", json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"})
 
         self.assertEqual(response.status_code, 200)

@@ -22,6 +22,7 @@ from execution_result_adapter import BootstrapResultAdapter, ExecutionResultAdap
 from cloud_run_bootstrap_client import CloudLoggingBootstrapReader, CloudRunBootstrapClient, CloudRunBootstrapClientError
 from durable_queue_service import DurableQueueRejected
 from v3_runtime import create_v3_queue_service
+from v3_approval_projection import V3ApprovalProjectionError, ensure_projected
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -91,7 +92,9 @@ def create_v3_queue_from_environment():
     )
 
 
-V3_QUEUE_SERVICE = create_v3_queue_from_environment()
+V3_QUEUE_RUNTIME = create_v3_queue_from_environment()
+V3_QUEUE_SERVICE = V3_QUEUE_RUNTIME.queue if V3_QUEUE_RUNTIME else None
+V3_TASK_STORE = V3_QUEUE_RUNTIME.tasks if V3_QUEUE_RUNTIME else None
 
 
 @app.before_request
@@ -231,6 +234,14 @@ def authorize_task(task_id):
         logging.warning("CONTROL_PLANE_BLOCKED authorization task=%s reason=%s", task_id, type(exc).__name__)
         return jsonify(status="BLOCKED", reason="authorization_rejected"), 409
 
+    if V3_TASK_STORE is None:
+        logging.error("V3_QUEUE_BLOCKED durable v3 task store is not configured")
+        return jsonify(status="BLOCKED", reason="v3_queue_not_configured"), 503
+    try:
+        ensure_projected(V3_TASK_STORE, task, "low-cost-first:" + ",".join(RUNNER_ORDER))
+    except V3ApprovalProjectionError:
+        logging.exception("V3_QUEUE_BLOCKED authorization projection failed")
+        return jsonify(status="BLOCKED", reason="v3_approval_projection_failed"), 503
     logging.info("CONTROL_PLANE_AUTHORIZED task=%s actor=%s", task.task_id, actor)
     return jsonify(status=task.status.value, task_id=task.task_id), 200
 
