@@ -184,6 +184,13 @@ class ExecutionPlatform:
 
     def queue(self, task_id: str, preflight: Iterable[bool]) -> ExecutionRecord:
         task = self._task(task_id, V3Status.AUTHORIZED, V3Status.EXECUTION_FAILED_RETRYABLE)
+        return self.queue_existing(task, preflight)
+
+    @staticmethod
+    def queue_existing(task: V3Task, preflight: Iterable[bool]) -> ExecutionRecord:
+        """Transition a loaded task without deciding how persistence is done."""
+        if task.status not in {V3Status.AUTHORIZED, V3Status.EXECUTION_FAILED_RETRYABLE}:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if not all(preflight):
             raise PreflightRejected("execution_preflight_failed")
         attempt = 1 if task.execution is None else task.execution.attempt + 1
