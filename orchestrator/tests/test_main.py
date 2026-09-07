@@ -140,6 +140,40 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json["reason"], "task_id_invalid")
 
+    def test_v3_queue_endpoint_requires_private_runtime_wiring(self):
+        response = self.client.post(
+            "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/queue"
+        )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json["reason"], "v3_queue_not_configured")
+
+    def test_v3_queue_endpoint_returns_only_queued_execution_identity(self):
+        task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
+        record = unittest.mock.Mock(execution_id="execution-1", attempt=1)
+        report = unittest.mock.Mock(public_dict=lambda: {"passed": True, "checks": []})
+        queue = unittest.mock.Mock()
+        queue.request.return_value = (record, report)
+
+        with patch("main.V3_QUEUE_SERVICE", queue):
+            response = self.client.post(f"/control-plane/v3/tasks/{task_id}/queue")
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json["status"], "EXECUTION_QUEUED")
+        self.assertEqual(response.json["execution_id"], "execution-1")
+        queue.request.assert_called_once_with(task_id)
+
+    def test_v3_queue_endpoint_blocks_failed_preflight_without_launching(self):
+        task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
+        queue = unittest.mock.Mock()
+        queue.request.side_effect = main.DurableQueueRejected("execution_preflight_failed")
+
+        with patch("main.V3_QUEUE_SERVICE", queue):
+            response = self.client.post(f"/control-plane/v3/tasks/{task_id}/queue")
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json["reason"], "execution_preflight_failed")
+
     def test_legacy_bootstrap_is_disabled_before_any_identity_or_worker_access(self):
         task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
         with patch("main.CONTROL_PLANE", unittest.mock.Mock()), patch("main.bootstrap_caller_is_authorized") as authorization:
