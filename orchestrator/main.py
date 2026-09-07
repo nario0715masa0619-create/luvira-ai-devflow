@@ -20,6 +20,7 @@ from execution_broker import ExecutionBroker, ExecutionBrokerError
 from artifact_handoff import ArtifactHandoff, FirestoreVerifiedArtifactStore
 from execution_result_adapter import BootstrapResultAdapter, ExecutionResultAdapterError
 from cloud_run_bootstrap_client import CloudLoggingBootstrapReader, CloudRunBootstrapClient, CloudRunBootstrapClientError
+from durable_queue_service import DurableQueueRejected
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -66,6 +67,10 @@ def initialize_control_plane() -> ControlPlane | None:
 
 
 CONTROL_PLANE = initialize_control_plane()
+# v3 queue wiring is supplied only by the private runtime composition.  An
+# absent service fails closed; this module never falls back to the retired
+# synchronous bootstrap route.
+V3_QUEUE_SERVICE = None
 
 
 @app.before_request
@@ -207,6 +212,32 @@ def authorize_task(task_id):
 
     logging.info("CONTROL_PLANE_AUTHORIZED task=%s actor=%s", task.task_id, actor)
     return jsonify(status=task.status.value, task_id=task.task_id), 200
+
+
+@app.post("/control-plane/v3/tasks/<task_id>/queue")
+def queue_v3_task(task_id):
+    """Queue one already-authorized v3 task; this route cannot start a worker."""
+    if not re.fullmatch(r"github-issue-[1-9][0-9]*-[0-9a-f]{16}", task_id):
+        return jsonify(status="BLOCKED", reason="task_id_invalid"), 400
+    if V3_QUEUE_SERVICE is None:
+        logging.error("V3_QUEUE_BLOCKED durable queue is not configured")
+        return jsonify(status="BLOCKED", reason="v3_queue_not_configured"), 503
+    try:
+        record, report = V3_QUEUE_SERVICE.request(task_id)
+    except DurableQueueRejected as exc:
+        code = str(exc)
+        status = 409 if code == "execution_preflight_failed" else 503
+        return jsonify(status="BLOCKED", reason=code), status
+    except Exception:
+        logging.exception("V3_QUEUE_BLOCKED queue request failed")
+        return jsonify(status="BLOCKED", reason="v3_queue_unavailable"), 503
+    return jsonify(
+        status="EXECUTION_QUEUED",
+        task_id=task_id,
+        execution_id=record.execution_id,
+        attempt=record.attempt,
+        preflight=report.public_dict(),
+    ), 202
 
 
 @app.post("/control-plane/tasks/<task_id>/bootstrap")
