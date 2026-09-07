@@ -140,13 +140,14 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json["reason"], "task_id_invalid")
 
-    def test_bootstrap_rejects_a_caller_outside_the_human_approval_workflow(self):
+    def test_legacy_bootstrap_is_disabled_before_any_identity_or_worker_access(self):
         task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
-        with patch("main.CONTROL_PLANE", unittest.mock.Mock()), patch("main.bootstrap_caller_is_authorized", return_value=False):
+        with patch("main.CONTROL_PLANE", unittest.mock.Mock()), patch("main.bootstrap_caller_is_authorized") as authorization:
             response = self.client.post(f"/control-plane/tasks/{task_id}/bootstrap", json={"allowed_paths": ["README.md"]})
 
-        self.assertEqual(response.status_code, 403)
-        self.assertEqual(response.json["reason"], "bootstrap_caller_unauthorized")
+        self.assertEqual(response.status_code, 410)
+        self.assertEqual(response.json["reason"], "legacy_execution_route_disabled")
+        authorization.assert_not_called()
 
     def test_github_worker_readiness_returns_identity_only(self):
         configured = {
