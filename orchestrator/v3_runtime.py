@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from google.cloud import firestore
 from google.cloud import run_v2
@@ -12,6 +13,12 @@ from durable_queue_service import DurableQueueService
 from execution_preflight import ExecutionPreflight, PreflightCheck
 from v3_task_store import FirestoreV3TaskStore
 from v3_transaction import V3Transaction
+
+
+@dataclass(frozen=True)
+class V3QueueRuntime:
+    tasks: FirestoreV3TaskStore
+    queue: DurableQueueService
 
 
 def create_v3_queue_service(
@@ -24,7 +31,7 @@ def create_v3_queue_service(
     record_collection: str,
     artifact_boundary_available: Callable[[], bool],
     provider_available: Callable[[], bool],
-) -> DurableQueueService:
+) -> V3QueueRuntime:
     """Compose only read checks plus the durable queue; never a launcher."""
     firestore_client = firestore.Client()
     jobs = run_v2.JobsClient()
@@ -71,8 +78,9 @@ def create_v3_queue_service(
         artifact_check,
         provider_check,
     ))
-    return DurableQueueService(
-        FirestoreV3TaskStore(firestore_client, task_collection),
+    tasks = FirestoreV3TaskStore(firestore_client, task_collection)
+    return V3QueueRuntime(tasks, DurableQueueService(
+        tasks,
         preflight,
         V3Transaction(firestore_client, task_collection, record_collection),
-    )
+    ))
