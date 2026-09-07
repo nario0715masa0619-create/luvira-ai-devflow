@@ -7,7 +7,7 @@ from typing import Any
 from google.api_core.exceptions import AlreadyExists
 from google.cloud import firestore
 
-from execution_platform import ExecutionPlatformError, TaskSpec, V3Status, V3Task
+from execution_platform import ExecutionPlatformError, ExecutionRecord, TaskSpec, V3Status, V3Task
 
 
 class V3TaskStoreError(ExecutionPlatformError):
@@ -15,21 +15,40 @@ class V3TaskStoreError(ExecutionPlatformError):
 
 
 def task_payload(task: V3Task) -> dict[str, Any]:
-    return {
+    payload = {
         "task_id": task.task_id, "spec": task.spec.canonical_dict(), "spec_hash": task.spec.hash,
         "status": task.status.value, "approval_binding": task.approval_binding,
         "audit": list(task.audit), "revision": task.revision,
     }
+    if task.execution is not None:
+        payload["execution"] = {
+            "execution_id": task.execution.execution_id, "task_id": task.execution.task_id,
+            "spec_hash": task.execution.spec_hash, "attempt": task.execution.attempt,
+            "status": task.execution.status.value, "provider": task.execution.provider,
+            "external_operation_id": task.execution.external_operation_id,
+            "failure_code": task.execution.failure_code, "revision": task.execution.revision,
+        }
+    return payload
 
 
 def task_from_payload(value: dict[str, Any]) -> V3Task:
     try:
+        execution_value = value.get("execution")
+        execution = None if execution_value is None else ExecutionRecord(
+            execution_id=execution_value["execution_id"], task_id=execution_value["task_id"],
+            spec_hash=execution_value["spec_hash"], attempt=execution_value["attempt"],
+            status=V3Status(execution_value["status"]), provider=execution_value.get("provider"),
+            external_operation_id=execution_value.get("external_operation_id"),
+            failure_code=execution_value.get("failure_code"), revision=execution_value.get("revision", 1),
+        )
         task = V3Task(task_id=value["task_id"], spec=TaskSpec.from_dict(value["spec"]),
                       status=V3Status(value["status"]), approval_binding=value.get("approval_binding"),
-                      audit=list(value.get("audit", [])), revision=value["revision"])
+                      execution=execution, audit=list(value.get("audit", [])), revision=value["revision"])
     except (KeyError, TypeError, ValueError) as exc:
         raise V3TaskStoreError("v3_task_invalid") from exc
-    if value.get("spec_hash") != task.spec.hash or not all(isinstance(event, str) and event.isupper() for event in task.audit):
+    if (value.get("spec_hash") != task.spec.hash
+            or (task.execution is not None and (task.execution.task_id != task.task_id or task.execution.spec_hash != task.spec.hash))
+            or not all(isinstance(event, str) and event.isupper() for event in task.audit)):
         raise V3TaskStoreError("v3_task_integrity_invalid")
     return task
 

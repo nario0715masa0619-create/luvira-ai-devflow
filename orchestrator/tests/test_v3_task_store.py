@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import Mock
 
 from v3_task_store import FirestoreV3TaskStore, V3TaskStoreError, task_from_payload, task_payload
-from execution_platform import TaskSpec, V3Task
+from execution_platform import ExecutionRecord, TaskSpec, V3Status, V3Task
 
 
 def task():
@@ -23,10 +23,12 @@ class V3TaskStoreTest(unittest.TestCase):
         with self.assertRaisesRegex(V3TaskStoreError, "integrity"):
             task_from_payload(payload)
 
-    def test_create_uses_task_id_and_never_includes_execution_record(self):
-        self.store.create(task())
+    def test_create_uses_one_task_document_with_its_current_execution(self):
+        value = task()
+        value.execution = ExecutionRecord("execution-1", value.task_id, value.spec.hash, 1, V3Status.EXECUTION_QUEUED)
+        self.store.create(value)
         self.collection.document.assert_called_once_with("task-1")
-        self.assertNotIn("execution", self.reference.create.call_args.args[0])
+        self.assertEqual(self.reference.create.call_args.args[0]["execution"]["execution_id"], "execution-1")
 
     def test_stale_save_is_rejected_without_update(self):
         snapshot = Mock(exists=True)

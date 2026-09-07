@@ -24,9 +24,8 @@ permissions:
 
 jobs:
   authorize:
-    # Configure this environment in GitHub with required human reviewers before
-    # running the workflow. This workflow records the immutable authorization
-    # only; v3 owns all execution through a separate durable queue.
+    # GitHub supplies the protected human decision.  The v3 Control Plane is
+    # the sole owner of the atomic authorization-and-queue state transition.
     environment: human-approval
     runs-on: ubuntu-latest
     steps:
@@ -39,7 +38,7 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ env.ORCHESTRATOR_URL }}
           id_token_include_email: true
-      - name: Record the human authorization in the private Control Plane
+      - name: Authorize and admit the immutable v3 task
         env:
           ID_TOKEN: ${{ steps.auth.outputs.id_token }}
           TASK_ID: ${{ inputs.task_id }}
@@ -52,17 +51,5 @@ jobs:
             --header "Authorization: Bearer $ID_TOKEN" \
             --header "Content-Type: application/json" \
             --data "$body" \
-            "$ORCHESTRATOR_URL/control-plane/tasks/$TASK_ID/authorize")"
-          test "$(jq --raw-output '.status' <<<"$response")" = "AUTHORIZED"
-      - name: Queue the authorized v3 task after read-only preflight
-        env:
-          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
-          TASK_ID: ${{ inputs.task_id }}
-        run: |
-          set -euo pipefail
-          response="$(curl --fail --silent --show-error \
-            --header "Authorization: Bearer $ID_TOKEN" \
-            --header "Content-Type: application/json" \
-            --request POST \
-            "$ORCHESTRATOR_URL/control-plane/v3/tasks/$TASK_ID/queue")"
+            "$ORCHESTRATOR_URL/control-plane/v3/tasks/$TASK_ID/authorize-and-queue")"
           test "$(jq --raw-output '.status' <<<"$response")" = "EXECUTION_QUEUED"

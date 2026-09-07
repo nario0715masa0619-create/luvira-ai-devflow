@@ -59,72 +59,47 @@ class EventTest(unittest.TestCase):
         response = self.client.get("/readiness/control-plane")
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json["reason"], "control_plane_not_configured")
-
-    def test_control_plane_factory_requires_explicit_firestore_configuration(self):
-        with patch("main.TASK_STORE_BACKEND", ""):
-            with self.assertRaisesRegex(RuntimeError, "control_plane_backend_must_be_firestore"):
-                main.create_control_plane_from_environment()
-
-    def test_public_ingress_does_not_initialize_the_private_control_plane(self):
-        with patch.dict(os.environ, {"K_SERVICE": "luvira-devflow-github-ingress"}):
-            with patch("main.PUBLIC_WEBHOOK_INGRESS_ONLY", True), patch("main.create_control_plane_from_environment") as create:
-                self.assertIsNone(main.initialize_control_plane())
-
-        create.assert_not_called()
+        self.assertEqual(response.json["reason"], "v3_control_plane_not_configured")
 
     def test_control_plane_readiness_uses_read_only_firestore_probe(self):
-        store = unittest.mock.Mock(spec=main.FirestoreTaskStore)
-        control_plane = unittest.mock.Mock(store=store)
-        with patch("main.CONTROL_PLANE", control_plane), patch("main.FIRESTORE_TASK_COLLECTION", "devflow_control_plane_tasks"):
+        store = unittest.mock.Mock()
+        with patch("main.V3_TASK_STORE", store), patch("main.V3_TASK_COLLECTION", "devflow_execution_tasks"):
             response = self.client.get("/readiness/control-plane")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["backend"], "firestore")
+        self.assertEqual(response.json["lifecycle"], "v3-only")
         store.readiness_check.assert_called_once_with()
 
-    def test_private_authorization_records_a_bound_human_decision_without_starting_a_worker(self):
+    def test_private_authorization_and_queue_use_one_v3_control_plane_operation(self):
         task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
         approval_binding = "b" * 64
-        task = unittest.mock.Mock(status=main.TaskStatus.AUTHORIZED, task_id=task_id)
+        record = unittest.mock.Mock(execution_id="execution-1", attempt=1)
+        report = unittest.mock.Mock(public_dict=lambda: {"passed": True, "checks": []})
         control_plane = unittest.mock.Mock()
-        control_plane.authorize.return_value = task
-        with patch("main.CONTROL_PLANE", control_plane), patch("main.V3_TASK_STORE", unittest.mock.Mock()), patch("main.ensure_projected"):
+        control_plane.authorize_and_queue.return_value = (record, report)
+        with patch("main.V3_CONTROL_PLANE", control_plane):
             response = self.client.post(
-                f"/control-plane/tasks/{task_id}/authorize",
+                f"/control-plane/v3/tasks/{task_id}/authorize-and-queue",
                 json={"approval_binding": approval_binding, "actor": "nario0715masa0619-create"},
             )
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json, {"status": "AUTHORIZED", "task_id": task_id})
-        control_plane.authorize.assert_called_once_with(
-            task_id, actor="github-actions:nario0715masa0619-create", approval_binding=approval_binding
-        )
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json["status"], "EXECUTION_QUEUED")
+        control_plane.authorize_and_queue.assert_called_once_with(task_id, approval_binding, "nario0715masa0619-create")
 
     def test_private_authorization_rejects_missing_binding(self):
         response = self.client.post(
-            "/control-plane/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize",
+            "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize-and-queue",
             json={"actor": "nario0715masa0619-create"},
         )
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json["reason"], "approval_binding_required")
 
-    def test_private_authorization_is_idempotent_only_for_the_same_binding(self):
-        task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
-        existing = unittest.mock.Mock(status=main.TaskStatus.AUTHORIZED, task_id=task_id, approval_binding="b" * 64)
-        control_plane = unittest.mock.Mock()
-        control_plane.authorize.side_effect = main.TaskConflict("invalid_transition")
-        control_plane.store.get.return_value = existing
-        with patch("main.CONTROL_PLANE", control_plane), patch("main.V3_TASK_STORE", unittest.mock.Mock()), patch("main.ensure_projected"):
-            response = self.client.post(f"/control-plane/tasks/{task_id}/authorize", json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"})
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json["status"], "AUTHORIZED")
-
     def test_private_authorization_rejects_unsafe_actor(self):
         response = self.client.post(
-            "/control-plane/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize",
+            "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize-and-queue",
             json={"approval_binding": "b" * 64, "actor": "not an actor"},
         )
 
@@ -140,48 +115,18 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json["reason"], "task_id_invalid")
 
-    def test_v3_queue_endpoint_requires_private_runtime_wiring(self):
-        response = self.client.post(
-            "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/queue"
-        )
+    def test_v3_authorize_queue_requires_private_runtime_wiring(self):
+        response = self.client.post("/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize-and-queue", json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"})
 
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(response.json["reason"], "v3_queue_not_configured")
-
-    def test_v3_queue_endpoint_returns_only_queued_execution_identity(self):
-        task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
-        record = unittest.mock.Mock(execution_id="execution-1", attempt=1)
-        report = unittest.mock.Mock(public_dict=lambda: {"passed": True, "checks": []})
-        queue = unittest.mock.Mock()
-        queue.request.return_value = (record, report)
-
-        with patch("main.V3_QUEUE_SERVICE", queue):
-            response = self.client.post(f"/control-plane/v3/tasks/{task_id}/queue")
-
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.json["status"], "EXECUTION_QUEUED")
-        self.assertEqual(response.json["execution_id"], "execution-1")
-        queue.request.assert_called_once_with(task_id)
-
-    def test_v3_queue_endpoint_blocks_failed_preflight_without_launching(self):
-        task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
-        queue = unittest.mock.Mock()
-        queue.request.side_effect = main.DurableQueueRejected("execution_preflight_failed")
-
-        with patch("main.V3_QUEUE_SERVICE", queue):
-            response = self.client.post(f"/control-plane/v3/tasks/{task_id}/queue")
-
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(response.json["reason"], "execution_preflight_failed")
+        self.assertEqual(response.json["reason"], "v3_control_plane_not_configured")
 
     def test_legacy_bootstrap_is_disabled_before_any_identity_or_worker_access(self):
         task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
-        with patch("main.CONTROL_PLANE", unittest.mock.Mock()), patch("main.bootstrap_caller_is_authorized") as authorization:
-            response = self.client.post(f"/control-plane/tasks/{task_id}/bootstrap", json={"allowed_paths": ["README.md"]})
+        response = self.client.post(f"/control-plane/tasks/{task_id}/bootstrap", json={"allowed_paths": ["README.md"]})
 
         self.assertEqual(response.status_code, 410)
-        self.assertEqual(response.json["reason"], "legacy_execution_route_disabled")
-        authorization.assert_not_called()
+        self.assertEqual(response.json["reason"], "legacy_execution_route_retired")
 
     def test_github_worker_readiness_returns_identity_only(self):
         configured = {
@@ -243,9 +188,11 @@ class EventTest(unittest.TestCase):
         payload = self.approval_issue_payload(26)
         raw = json.dumps(payload).encode()
         signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
-        task = unittest.mock.Mock(status=main.TaskStatus.AWAITING_HUMAN_APPROVAL, task_id="task-26", spec_hash="abc", approval_binding="binding")
-        with patch("main.CONTROL_PLANE", unittest.mock.Mock()), patch("main.approval_issue_spec", return_value={"repository": "nario0715masa0619-create/luvira-ai-devflow"}), patch("main.spec_hash", return_value="a" * 64), patch("main.github_default_branch_sha", return_value="base"):
-            main.CONTROL_PLANE.create_draft.return_value = task
+        task = unittest.mock.Mock(status=main.V3Status.AWAITING_HUMAN_APPROVAL, task_id="task-26", approval_binding="binding")
+        task.spec.hash = "abc"
+        plane = unittest.mock.Mock()
+        plane.register.return_value = task
+        with patch("main.V3_CONTROL_PLANE", plane), patch("main.approval_issue_spec", return_value={"repository": "nario0715masa0619-create/luvira-ai-devflow"}), patch("main.task_spec_hash", return_value="a" * 64), patch("main.github_default_branch_sha", return_value="base"):
             response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "AWAITING_HUMAN_APPROVAL")
@@ -294,10 +241,10 @@ read
             spec = main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 31)
 
         self.assertEqual(spec["base_commit"], "f" * 40)
-        self.assertEqual(spec["task_type"], "documentation")
+        self.assertEqual(spec["approval_context"]["task_type"], "documentation")
         self.assertEqual(spec["acceptance_criteria"], ["README is reviewed"])
         self.assertEqual(spec["budget"], {"max_cost_usd": 1.0})
-        self.assertEqual(spec["source"]["issue_number"], 31)
+        self.assertEqual(spec["approval_context"]["source"]["issue_number"], 31)
 
     def test_approval_issue_form_preserves_an_explicit_implementation_request(self):
         payload = self.approval_issue_payload(33)

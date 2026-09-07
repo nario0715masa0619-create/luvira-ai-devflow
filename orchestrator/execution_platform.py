@@ -79,6 +79,10 @@ class TaskSpec:
     expiry: str
     allowed_paths: tuple[str, ...]
     model_policy: str
+    # Immutable non-execution approval facts (issue source, impact, exclusions
+    # and the human-visible approval statement).  They are part of the hash,
+    # so an approval can never be detached from the statement it approved.
+    approval_context: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "TaskSpec":
@@ -91,20 +95,21 @@ class TaskSpec:
                 acceptance_criteria=tuple(value["acceptance_criteria"]),
                 max_cost_usd=float(budget["max_cost_usd"]), expiry=value["expiry"],
                 allowed_paths=tuple(scope["allowed_paths"]), model_policy=value["model_policy"],
+                approval_context=dict(value.get("approval_context", {})),
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ExecutionPlatformError("task_spec_invalid") from exc
         if (not instance.repository or "/" not in instance.repository or not instance.base_commit
                 or not instance.requested_action or not instance.acceptance_criteria
                 or instance.max_cost_usd <= 0 or not instance.expiry or not instance.allowed_paths
-                or not instance.model_policy):
+                or not instance.model_policy or not isinstance(instance.approval_context, dict)):
             raise ExecutionPlatformError("task_spec_invalid")
         if any(not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/") for path in instance.allowed_paths):
             raise ExecutionPlatformError("task_scope_invalid")
         return instance
 
     def canonical_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "repository": self.repository, "base_commit": self.base_commit,
             "requested_action": self.requested_action,
             "acceptance_criteria": list(self.acceptance_criteria),
@@ -112,6 +117,9 @@ class TaskSpec:
             "execution_scope": {"allowed_paths": list(self.allowed_paths)},
             "model_policy": self.model_policy,
         }
+        if self.approval_context:
+            result["approval_context"] = self.approval_context
+        return result
 
     @property
     def hash(self) -> str:

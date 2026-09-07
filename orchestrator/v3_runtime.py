@@ -28,7 +28,6 @@ def create_v3_queue_service(
     worker_job: str,
     broker_service_account: str,
     task_collection: str,
-    record_collection: str,
     artifact_boundary_available: Callable[[], bool],
     provider_available: Callable[[], bool],
 ) -> V3QueueRuntime:
@@ -82,5 +81,5 @@ def create_v3_queue_service(
     return V3QueueRuntime(tasks, DurableQueueService(
         tasks,
         preflight,
-        V3Transaction(firestore_client, task_collection, record_collection),
+        V3Transaction(firestore_client, task_collection),
     ))
