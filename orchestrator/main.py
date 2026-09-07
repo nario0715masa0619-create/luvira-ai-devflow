@@ -211,7 +211,17 @@ def authorize_task(task_id):
 
 @app.post("/control-plane/tasks/<task_id>/bootstrap")
 def run_bootstrap(task_id):
-    """Private Broker route: only an already authorized task may start a Worker."""
+    """Retired v2 route; v3 must use a durable queue consumer instead.
+
+    This endpoint deliberately returns before checking identity, loading task
+    state, reading logs, or constructing a Cloud Run client.  Keeping the
+    tombstone prevents an old workflow retry from silently reviving the unsafe
+    synchronous execution path.
+    """
+    return jsonify(status="BLOCKED", reason="legacy_execution_route_disabled"), 410
+
+    # Retained below only until the v3 queue consumer is deployed; unreachable
+    # code is removed in the next cleanup PR after the new runtime is live.
     if CONTROL_PLANE is None:
         return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
     if not bootstrap_caller_is_authorized():
