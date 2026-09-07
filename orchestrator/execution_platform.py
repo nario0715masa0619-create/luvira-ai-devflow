@@ -139,6 +139,7 @@ class V3Task:
     approval_binding: str | None = None
     execution: ExecutionRecord | None = None
     audit: list[str] = field(default_factory=list)
+    revision: int = 1
 
 
 class ExecutionPlatform:
