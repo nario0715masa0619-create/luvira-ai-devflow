@@ -128,6 +128,7 @@ class ExecutionRecord:
     provider: str | None = None
     external_operation_id: str | None = None
     failure_code: str | None = None
+    revision: int = 1
 
 
 @dataclass
