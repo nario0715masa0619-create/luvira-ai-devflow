@@ -54,3 +54,15 @@ jobs:
             --data "$body" \
             "$ORCHESTRATOR_URL/control-plane/tasks/$TASK_ID/authorize")"
           test "$(jq --raw-output '.status' <<<"$response")" = "AUTHORIZED"
+      - name: Queue the authorized v3 task after read-only preflight
+        env:
+          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
+          TASK_ID: ${{ inputs.task_id }}
+        run: |
+          set -euo pipefail
+          response="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $ID_TOKEN" \
+            --header "Content-Type: application/json" \
+            --request POST \
+            "$ORCHESTRATOR_URL/control-plane/v3/tasks/$TASK_ID/queue")"
+          test "$(jq --raw-output '.status' <<<"$response")" = "EXECUTION_QUEUED"
