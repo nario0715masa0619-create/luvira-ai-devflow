@@ -19,7 +19,9 @@ def spec():
 
 class MemoryStore:
     def __init__(self): self.tasks = {}
-    def create(self, task): self.tasks[task.task_id] = task
+    def create(self, task):
+        if task.task_id in self.tasks: raise ValueError("v3_task_exists")
+        self.tasks[task.task_id] = task
     def get(self, task_id):
         if task_id not in self.tasks: raise ValueError("v3_task_not_found")
         return self.tasks[task_id]
@@ -65,3 +67,9 @@ class V3ControlPlaneTest(unittest.TestCase):
         changed = spec(); changed["approval_context"]["approval"] = "write source"
         with self.assertRaisesRegex(V3ControlPlaneError, "different_spec"):
             plane.register("github-issue-1-aaaaaaaaaaaaaaaa", changed)
+
+    def test_concurrent_webhook_delivery_reloads_the_winning_task(self):
+        store = MemoryStore(); plane = V3ControlPlane(store, Queue(store))
+        first = plane.register("github-issue-1-aaaaaaaaaaaaaaaa", spec())
+        repeated = plane.register("github-issue-1-aaaaaaaaaaaaaaaa", spec())
+        self.assertIs(first, repeated)
