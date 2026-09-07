@@ -12,17 +12,11 @@ from urllib.request import Request, urlopen
 import jwt
 from flask import Flask, jsonify, request
 from google.auth.transport.requests import Request as GoogleAuthRequest
-from google.cloud import firestore
 from google.oauth2 import id_token
 
-from control_plane import ControlPlane, ControlPlaneError, FirestoreTaskStore, TaskConflict, TaskNotFound, TaskStatus, spec_hash
-from execution_broker import ExecutionBroker, ExecutionBrokerError
-from artifact_handoff import ArtifactHandoff, FirestoreVerifiedArtifactStore
-from execution_result_adapter import BootstrapResultAdapter, ExecutionResultAdapterError
-from cloud_run_bootstrap_client import CloudLoggingBootstrapReader, CloudRunBootstrapClient, CloudRunBootstrapClientError
-from durable_queue_service import DurableQueueRejected
 from v3_runtime import create_v3_queue_service
-from v3_approval_projection import V3ApprovalProjectionError, ensure_projected
+from v3_control_plane import V3ControlPlane, V3ControlPlaneError
+from execution_platform import V3Status, task_spec_hash
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -37,10 +31,7 @@ OPENCODE_GO_MODELS_URL = "https://opencode.ai/zen/go/v1/models"
 GITHUB_API_URL = "https://api.github.com"
 PUBLIC_WEBHOOK_INGRESS_ONLY = os.environ.get("PUBLIC_WEBHOOK_INGRESS_ONLY", "").lower() in {"1", "true", "yes"}
 ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "").rstrip("/")
-TASK_STORE_BACKEND = os.environ.get("TASK_STORE_BACKEND", "").strip().lower()
-FIRESTORE_TASK_COLLECTION = os.environ.get("FIRESTORE_TASK_COLLECTION", "").strip()
 V3_TASK_COLLECTION = os.environ.get("V3_TASK_COLLECTION", "").strip()
-V3_RECORD_COLLECTION = os.environ.get("V3_RECORD_COLLECTION", "").strip()
 BROKER_SERVICE_ACCOUNT = os.environ.get("BROKER_SERVICE_ACCOUNT", "").strip()
 WORKER_JOB = os.environ.get("ISOLATED_WORKER_JOB", "luvira-devflow-isolated-worker-bootstrap")
 WORKER_REGION = os.environ.get("ISOLATED_WORKER_REGION", "us-central1")
@@ -51,34 +42,13 @@ WORKER_ARTIFACT_VIEW = os.environ.get("ISOLATED_WORKER_ARTIFACT_VIEW", "bootstra
 BOOTSTRAP_CALLER_EMAIL = os.environ.get("BOOTSTRAP_CALLER_EMAIL", "devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com")
 
 
-def create_control_plane_from_environment() -> ControlPlane:
-    """Create the production store only from explicit, non-secret settings."""
-    if TASK_STORE_BACKEND != "firestore":
-        raise RuntimeError("control_plane_backend_must_be_firestore")
-    if not FIRESTORE_TASK_COLLECTION:
-        raise RuntimeError("firestore_task_collection_not_configured")
-    return ControlPlane(FirestoreTaskStore(firestore.Client(), collection=FIRESTORE_TASK_COLLECTION))
-
-
-def initialize_control_plane() -> ControlPlane | None:
-    """Initialize durable state only in the private Control Plane service.
-
-    The public ingress validates and forwards signed webhook bytes.  It must not
-    need Firestore configuration or a Firestore-capable identity merely to boot.
-    """
-    if not os.environ.get("K_SERVICE") or PUBLIC_WEBHOOK_INGRESS_ONLY:
-        return None
-    return create_control_plane_from_environment()
-
-
-CONTROL_PLANE = initialize_control_plane()
 # v3 queue wiring is supplied only by the private runtime composition.  An
 # absent service fails closed; this module never falls back to the retired
 # synchronous bootstrap route.
 def create_v3_queue_from_environment():
     if not os.environ.get("K_SERVICE") or PUBLIC_WEBHOOK_INGRESS_ONLY:
         return None
-    if not all((V3_TASK_COLLECTION, V3_RECORD_COLLECTION, BROKER_SERVICE_ACCOUNT)):
+    if not all((V3_TASK_COLLECTION, BROKER_SERVICE_ACCOUNT)):
         return None
     return create_v3_queue_service(
         project=os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"),
@@ -86,7 +56,6 @@ def create_v3_queue_from_environment():
         worker_job=WORKER_JOB,
         broker_service_account=BROKER_SERVICE_ACCOUNT,
         task_collection=V3_TASK_COLLECTION,
-        record_collection=V3_RECORD_COLLECTION,
         artifact_boundary_available=lambda: bool(WORKER_ARTIFACT_BUCKET and WORKER_ARTIFACT_VIEW),
         provider_available=lambda: bool(os.environ.get("OPENCODE_GO_API_KEY")) and opencode_go_model_count(os.environ["OPENCODE_GO_API_KEY"]) > 0,
     )
@@ -95,6 +64,7 @@ def create_v3_queue_from_environment():
 V3_QUEUE_RUNTIME = create_v3_queue_from_environment()
 V3_QUEUE_SERVICE = V3_QUEUE_RUNTIME.queue if V3_QUEUE_RUNTIME else None
 V3_TASK_STORE = V3_QUEUE_RUNTIME.tasks if V3_QUEUE_RUNTIME else None
+V3_CONTROL_PLANE = V3ControlPlane(V3_TASK_STORE, V3_QUEUE_SERVICE) if V3_TASK_STORE and V3_QUEUE_SERVICE else None
 
 
 @app.before_request
@@ -181,30 +151,21 @@ def healthz():
 
 @app.get("/readiness/control-plane")
 def control_plane_readiness():
-    """Read-only proof that the deployed identity can reach Firestore."""
-    if CONTROL_PLANE is None:
-        logging.error("CONTROL_PLANE_BLOCKED durable store is not initialized")
-        return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
+    """Read-only proof of the only task aggregate store."""
+    if V3_TASK_STORE is None:
+        logging.error("V3_CONTROL_PLANE_BLOCKED durable store is not initialized")
+        return jsonify(status="BLOCKED", reason="v3_control_plane_not_configured"), 503
     try:
-        store = CONTROL_PLANE.store
-        if not isinstance(store, FirestoreTaskStore):
-            raise RuntimeError("control_plane_store_is_not_durable")
-        store.readiness_check()
+        V3_TASK_STORE.readiness_check()
     except Exception:
-        logging.warning("CONTROL_PLANE_BLOCKED Firestore readiness check failed")
-        return jsonify(status="BLOCKED", reason="control_plane_unavailable"), 503
-    return jsonify(status="READY", backend="firestore", collection=FIRESTORE_TASK_COLLECTION)
+        logging.warning("V3_CONTROL_PLANE_BLOCKED Firestore readiness check failed")
+        return jsonify(status="BLOCKED", reason="v3_control_plane_unavailable"), 503
+    return jsonify(status="READY", backend="firestore", collection=V3_TASK_COLLECTION, lifecycle="v3-only")
 
 
-@app.post("/control-plane/tasks/<task_id>/authorize")
-def authorize_task(task_id):
-    """Record a manual GitHub approval; this endpoint never starts a worker.
-
-    Cloud Run IAM keeps this route private. The only intended caller is the
-    dedicated, manually dispatched GitHub Actions approval workflow. Its
-    protected GitHub Environment is the human gate; the binding prevents a
-    decision for one immutable task snapshot from being reused for another.
-    """
+@app.post("/control-plane/v3/tasks/<task_id>/authorize-and-queue")
+def authorize_and_queue_v3_task(task_id):
+    """Commit one human decision and admit one v3 task through preflight."""
     payload = request.get_json(silent=True) or {}
     approval_binding = payload.get("approval_binding")
     actor = payload.get("actor")
@@ -215,54 +176,19 @@ def authorize_task(task_id):
     if not isinstance(actor, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}", actor):
         return jsonify(status="BLOCKED", reason="approval_actor_invalid"), 400
 
-    if CONTROL_PLANE is None:
-        logging.error("CONTROL_PLANE_BLOCKED durable store is not initialized")
-        return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
-
+    if V3_CONTROL_PLANE is None:
+        return jsonify(status="BLOCKED", reason="v3_control_plane_not_configured"), 503
     try:
-        task = CONTROL_PLANE.authorize(task_id, actor=f"github-actions:{actor}", approval_binding=approval_binding)
-    except TaskNotFound:
-        return jsonify(status="BLOCKED", reason="task_not_found"), 404
-    except TaskConflict:
-        # A delivery retry must not demand a second human approval.  It may
-        # only reuse the exact immutable binding already recorded on the task.
-        existing = CONTROL_PLANE.store.get(task_id)
-        if existing.approval_binding == approval_binding and existing.status in {TaskStatus.AUTHORIZED, TaskStatus.EXECUTION_FAILED_RETRYABLE}:
-            return jsonify(status=existing.status.value, task_id=existing.task_id), 200
-        return jsonify(status="BLOCKED", reason="authorization_rejected"), 409
-    except (ControlPlaneError, ValueError) as exc:
-        logging.warning("CONTROL_PLANE_BLOCKED authorization task=%s reason=%s", task_id, type(exc).__name__)
-        return jsonify(status="BLOCKED", reason="authorization_rejected"), 409
-
-    if V3_TASK_STORE is None:
-        logging.error("V3_QUEUE_BLOCKED durable v3 task store is not configured")
-        return jsonify(status="BLOCKED", reason="v3_queue_not_configured"), 503
-    try:
-        ensure_projected(V3_TASK_STORE, task, "low-cost-first:" + ",".join(RUNNER_ORDER))
-    except V3ApprovalProjectionError:
-        logging.exception("V3_QUEUE_BLOCKED authorization projection failed")
-        return jsonify(status="BLOCKED", reason="v3_approval_projection_failed"), 503
-    logging.info("CONTROL_PLANE_AUTHORIZED task=%s actor=%s", task.task_id, actor)
-    return jsonify(status=task.status.value, task_id=task.task_id), 200
-
-
-@app.post("/control-plane/v3/tasks/<task_id>/queue")
-def queue_v3_task(task_id):
-    """Queue one already-authorized v3 task; this route cannot start a worker."""
-    if not re.fullmatch(r"github-issue-[1-9][0-9]*-[0-9a-f]{16}", task_id):
-        return jsonify(status="BLOCKED", reason="task_id_invalid"), 400
-    if V3_QUEUE_SERVICE is None:
-        logging.error("V3_QUEUE_BLOCKED durable queue is not configured")
-        return jsonify(status="BLOCKED", reason="v3_queue_not_configured"), 503
-    try:
-        record, report = V3_QUEUE_SERVICE.request(task_id)
-    except DurableQueueRejected as exc:
+        record, report = V3_CONTROL_PLANE.authorize_and_queue(task_id, approval_binding, actor)
+    except V3ControlPlaneError as exc:
         code = str(exc)
-        status = 409 if code == "execution_preflight_failed" else 503
+        status = 404 if code == "task_not_found" else 409 if code in {"approval_binding_mismatch", "authorization_not_reusable", "execution_preflight_failed", "queue_state_conflict"} else 503
         return jsonify(status="BLOCKED", reason=code), status
     except Exception:
-        logging.exception("V3_QUEUE_BLOCKED queue request failed")
+        logging.exception("V3_CONTROL_PLANE_BLOCKED queue request failed")
         return jsonify(status="BLOCKED", reason="v3_queue_unavailable"), 503
+    if report is None:
+        return jsonify(status="EXECUTION_QUEUED", task_id=task_id, execution_id=record.execution_id, attempt=record.attempt, idempotent=True), 202
     return jsonify(
         status="EXECUTION_QUEUED",
         task_id=task_id,
@@ -281,43 +207,7 @@ def run_bootstrap(task_id):
     tombstone prevents an old workflow retry from silently reviving the unsafe
     synchronous execution path.
     """
-    return jsonify(status="BLOCKED", reason="legacy_execution_route_disabled"), 410
-
-    # Retained below only until the v3 queue consumer is deployed; unreachable
-    # code is removed in the next cleanup PR after the new runtime is live.
-    if CONTROL_PLANE is None:
-        return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
-    if not bootstrap_caller_is_authorized():
-        return jsonify(status="BLOCKED", reason="bootstrap_caller_unauthorized"), 403
-    try:
-        task = CONTROL_PLANE.start_execution(task_id, actor="github-actions:human-approval")
-        envelope = ExecutionBroker().prepare(task).public_dict()
-        client = CloudRunBootstrapClient(os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"), WORKER_REGION, WORKER_JOB)
-        reader = CloudLoggingBootstrapReader(os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"), WORKER_REGION, WORKER_ARTIFACT_BUCKET, WORKER_ARTIFACT_VIEW)
-        handoff = ArtifactHandoff(FirestoreVerifiedArtifactStore(firestore.Client()))
-        record = BootstrapResultAdapter(client, reader, handoff).execute_and_verify(envelope)
-    except (TaskNotFound, ExecutionBrokerError, ExecutionResultAdapterError, CloudRunBootstrapClientError, ValueError) as exc:
-        try:
-            CONTROL_PLANE.fail_execution(task_id, actor="broker", reason=type(exc).__name__)
-        except (ControlPlaneError, TaskNotFound):
-            pass
-        return jsonify(status="RETRYABLE_FAILURE", reason="bootstrap_execution_rejected"), 409
-    CONTROL_PLANE.complete_execution(task_id, actor="broker", execution_id=record.execution_id)
-    return jsonify(status="VERIFIED", task_id=record.artifact.task_id, execution_id=record.execution_id), 200
-
-
-def bootstrap_caller_is_authorized() -> bool:
-    """Require a Google-signed service identity before a Worker may be started."""
-    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
-    audience = ORCHESTRATOR_URL or request.url_root.rstrip("/")
-    if not token or not audience:
-        return False
-    try:
-        claims = id_token.verify_oauth2_token(token, GoogleAuthRequest(), audience=audience)
-    except Exception:
-        return False
-    return claims.get("email") == BOOTSTRAP_CALLER_EMAIL and claims.get("email_verified") is True
-
+    return jsonify(status="BLOCKED", reason="legacy_execution_route_retired"), 410
 
 @app.get("/readiness/opencode-go")
 def opencode_go_readiness():
@@ -433,36 +323,29 @@ def register_approval_issue(payload, repository, issue, action):
     This is intentionally the final operation of webhook intake.  It does not
     select a model, enqueue a worker, create a branch, or call an AI provider.
     """
-    if CONTROL_PLANE is None:
-        logging.error("CONTROL_PLANE_BLOCKED durable store is not initialized")
-        return jsonify(status="BLOCKED", reason="control_plane_not_configured"), 503
+    if V3_CONTROL_PLANE is None:
+        logging.error("V3_CONTROL_PLANE_BLOCKED durable store is not initialized")
+        return jsonify(status="BLOCKED", reason="v3_control_plane_not_configured"), 503
     try:
         spec = approval_issue_spec(payload, repository, issue)
-        task_id = f"github-issue-{issue}-{spec_hash(spec)[:16]}"
-        try:
-            task = CONTROL_PLANE.create_draft(spec, actor="github-webhook", task_id=task_id)
-        except TaskConflict:
-            task = CONTROL_PLANE.store.get(task_id)
-        if task.status is TaskStatus.DRAFT:
-            task = CONTROL_PLANE.validate(task.task_id, actor="control-plane")
-        if task.status is TaskStatus.VALIDATED:
-            task = CONTROL_PLANE.request_human_approval(task.task_id, actor="control-plane")
-    except (ControlPlaneError, ValueError) as exc:
+        task_id = f"github-issue-{issue}-{task_spec_hash(spec)[:16]}"
+        task = V3_CONTROL_PLANE.register(task_id, spec)
+    except (V3ControlPlaneError, ValueError) as exc:
         logging.warning(
-            "CONTROL_PLANE_BLOCKED invalid approval issue=%s action=%s reason=%s",
+            "V3_CONTROL_PLANE_BLOCKED invalid approval issue=%s action=%s reason=%s",
             issue,
             action,
             type(exc).__name__,
         )
         return jsonify(status="BLOCKED", reason="invalid_approval_issue"), 400
 
-    if task.status is not TaskStatus.AWAITING_HUMAN_APPROVAL:
-        logging.warning("CONTROL_PLANE_BLOCKED task=%s status=%s", task.task_id, task.status.value)
+    if task.status is not V3Status.AWAITING_HUMAN_APPROVAL:
+        logging.warning("V3_CONTROL_PLANE_BLOCKED task=%s status=%s", task.task_id, task.status.value)
         return jsonify(status="BLOCKED", reason="approval_task_not_pending"), 409
     return jsonify(
         status="AWAITING_HUMAN_APPROVAL",
         task_id=task.task_id,
-        spec_hash=task.spec_hash,
+        spec_hash=task.spec.hash,
         approval_binding=task.approval_binding,
         issue=issue,
     )
@@ -496,19 +379,20 @@ def approval_issue_spec(payload, repository, issue_number):
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("invalid_execution_scope") from exc
     return {
-        "project_id": form["Project ID"],
         "repository": repository,
         "base_commit": github_default_branch_sha(repository),
-        "task_type": form["タスク種別"],
         "acceptance_criteria": criteria,
         "budget": {"max_cost_usd": max_cost_usd},
         "requested_action": form["許可を求める最初のアクション"],
-        "approval": form["承認すること"],
-        "impact": form["影響"],
-        "excluded": form["しないこと"],
         "execution_scope": {"allowed_paths": allowed_paths},
         "expiry": form["有効期限（UTC）"],
-        "source": {"issue_number": issue_number, "issue_node_id": issue.get("node_id")},
+        "model_policy": "low-cost-first:" + ",".join(RUNNER_ORDER),
+        "approval_context": {
+            "project_id": form["Project ID"], "task_type": form["タスク種別"],
+            "approval": form["承認すること"], "impact": form["影響"],
+            "excluded": form["しないこと"],
+            "source": {"issue_number": issue_number, "issue_node_id": issue.get("node_id")},
+        },
     }
 
 

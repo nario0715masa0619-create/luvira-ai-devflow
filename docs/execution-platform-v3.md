@@ -1,5 +1,34 @@
 # Execution Platform v3 — 実行基盤の再設計
 
+## 2026-09-07: 設計の是正（v3-only）
+
+以前の実装は、旧Control Planeのtaskとv3のtaskを別々に保持し、承認時に
+変換（projection）していた。この二重状態が、既に失敗した旧taskの状態を
+新しいキュー処理へ再流入させた。これは実装上の不具合ではなく、所有者が二つ
+あるという設計不備である。
+
+以後の正規経路は一つだけとする。
+
+```text
+署名済み Issue Form
+  → v3 task aggregate（単一Firestore文書）
+  → GitHub protected environment の人間承認
+  → v3 authorize-and-queue（一つのHTTP操作）
+  → read-only preflight → queued execution
+```
+
+- v2 task、v2 `authorize`、v3 projection、二段階のauthorize/queue APIは廃止する。
+- task文書にはTaskSpec、承認時に見せた文脈、binding、監査列、現在のexecutionを
+  同居させる。実行記録用の別コレクションは持たない。
+- Issue Formの「承認すること」「影響」「しないこと」「source」もspec hashに含める。
+  実行対象だけでなく、人間が判断した文脈も変更できない。
+- 同じGitHub Actionsの再送は、同じqueued execution IDを返すだけで二重起動しない。
+- 旧taskは移行・投影しない。すでに作成済みのIssueは安全に再利用できないため、
+  v3-only切替後に新しいIssue Formとして起票し直す。
+- 新規実働は、CIの単体・コンテナ試験とデプロイ後readinessが通るまで開始しない。
+
+この切替は一つの変更としてレビューし、旧・新の二重稼働期間を設けない。
+
 ## 決定
 
 既存の `Authorize approved DevFlow task` からWorkerを同期起動する経路を凍結する。GitHub Actionsは人間承認の記録だけを担い、実行開始・再試行・結果回収・失敗分類はControl Planeが管理する永続的な実行レコードへ分離する。

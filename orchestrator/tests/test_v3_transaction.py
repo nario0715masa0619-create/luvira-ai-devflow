@@ -9,8 +9,8 @@ from v3_transaction import V3Transaction, V3TransactionError
 class V3TransactionTest(unittest.TestCase):
     def setUp(self):
         self.client = Mock()
-        self.task_ref, self.record_ref = Mock(), Mock()
-        self.client.collection.return_value.document.side_effect = [self.task_ref, self.record_ref]
+        self.task_ref = Mock()
+        self.client.collection.return_value.document.return_value = self.task_ref
         self.client.transactional = lambda function: function
         self.transaction = Mock()
         self.client.transaction.return_value = self.transaction
@@ -26,16 +26,17 @@ class V3TransactionTest(unittest.TestCase):
         self.record = ExecutionRecord(
             "execution", "task", self.spec.hash, 1, V3Status.EXECUTION_QUEUED
         )
+        self.queued.execution = self.record
 
-    def test_updates_authorized_task_and_creates_record_in_one_transaction(self):
+    def test_updates_authorized_task_with_embedded_execution_in_one_transaction(self):
         task_snapshot = Mock(exists=True)
         task_snapshot.to_dict.return_value = task_payload(self.original)
-        self.transaction.get.side_effect = [task_snapshot, Mock(exists=False)]
+        self.transaction.get.return_value = task_snapshot
 
         V3Transaction(self.client).queue_authorized(self.queued, self.record)
 
         self.transaction.update.assert_called_once()
-        self.transaction.create.assert_called_once()
+        self.transaction.create.assert_not_called()
         self.assertEqual(self.queued.revision, 2)
 
     def test_rejects_non_authorized_persisted_task_without_writing(self):
