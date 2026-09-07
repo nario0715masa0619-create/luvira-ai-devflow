@@ -8,7 +8,7 @@ from google.cloud import firestore
 
 from execution_platform import ExecutionRecord, V3Status, V3Task
 from execution_record_store import record_payload
-from v3_task_store import task_payload
+from v3_task_store import task_from_payload, task_payload
 
 
 class V3TransactionError(ValueError):
@@ -26,8 +26,8 @@ class V3Transaction:
         self.tasks = client.collection(task_collection)
         self.records = client.collection(record_collection)
 
-    def create_queued(self, task: V3Task, record: ExecutionRecord) -> None:
-        """Atomically persist exactly one queued record for an authorized task."""
+    def queue_authorized(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Atomically transition an authorized task and create its record."""
         if task.status is not V3Status.EXECUTION_QUEUED:
             raise V3TransactionError("task_not_queued")
         if record.status is not V3Status.EXECUTION_QUEUED:
@@ -39,12 +39,23 @@ class V3Transaction:
         record_ref = self.records.document(record.execution_id)
 
         def write(transaction: Any) -> None:
-            if transaction.get(task_ref).exists or transaction.get(record_ref).exists:
-                raise V3TransactionError("v3_identity_exists")
-            transaction.create(task_ref, task_payload(task))
+            task_snapshot = transaction.get(task_ref)
+            if not task_snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(task_snapshot.to_dict())
+            if stored.status is not V3Status.AUTHORIZED:
+                raise V3TransactionError("v3_task_not_authorized")
+            if stored.spec.hash != task.spec.hash or stored.revision != task.revision:
+                raise V3TransactionError("v3_task_stale_or_modified")
+            if transaction.get(record_ref).exists:
+                raise V3TransactionError("v3_execution_exists")
+            payload = task_payload(task)
+            payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
             transaction.create(record_ref, record_payload(record))
 
         self._run_transaction(write)
+        task.revision += 1
 
     def _run_transaction(self, write: Callable[[Any], None]) -> None:
         transaction = self.client.transaction()
