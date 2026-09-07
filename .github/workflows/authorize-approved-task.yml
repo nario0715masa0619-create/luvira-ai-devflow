@@ -38,7 +38,7 @@ jobs:
           token_format: id_token
           id_token_audience: ${{ env.ORCHESTRATOR_URL }}
           id_token_include_email: true
-      - name: Authorize and admit the immutable v3 task
+      - name: Record the immutable human authorization
         env:
           ID_TOKEN: ${{ steps.auth.outputs.id_token }}
           TASK_ID: ${{ inputs.task_id }}
@@ -51,5 +51,5 @@ jobs:
             --header "Authorization: Bearer $ID_TOKEN" \
             --header "Content-Type: application/json" \
             --data "$body" \
-            "$ORCHESTRATOR_URL/control-plane/v3/tasks/$TASK_ID/authorize-and-queue")"
-          test "$(jq --raw-output '.status' <<<"$response")" = "EXECUTION_QUEUED"
+            "$ORCHESTRATOR_URL/control-plane/v3/tasks/$TASK_ID/authorize")"
+          test "$(jq --raw-output '.status' <<<"$response")" = "AUTHORIZED"

@@ -93,3 +93,19 @@ class V3ControlPlane:
             raise V3ControlPlaneError(str(exc)) from exc
         except TransitionRejected as exc:
             raise V3ControlPlaneError("queue_state_conflict") from exc
+
+    def authorize(self, task_id: str, binding: str, actor: str) -> V3Task:
+        """Persist human approval only; execution is owned by the broker."""
+        try:
+            task = self.tasks.get(task_id)
+        except Exception as exc:
+            raise V3ControlPlaneError("task_not_found") from exc
+        if binding != _binding(task.task_id, task.spec) or binding != task.approval_binding:
+            raise V3ControlPlaneError("approval_binding_mismatch")
+        if task.status is V3Status.AWAITING_HUMAN_APPROVAL:
+            task.status = V3Status.AUTHORIZED
+            task.audit.append("TASK_AUTHORIZED")
+            self.tasks.save(task)
+        elif task.status not in {V3Status.AUTHORIZED, V3Status.EXECUTION_QUEUED, V3Status.EXECUTION_RUNNING}:
+            raise V3ControlPlaneError("authorization_not_reusable")
+        return task

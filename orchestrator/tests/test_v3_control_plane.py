@@ -61,6 +61,14 @@ class V3ControlPlaneTest(unittest.TestCase):
         self.assertIsNone(report)
         self.assertEqual(queue.calls, 1)
 
+    def test_authorization_survives_broker_unavailability_without_queueing(self):
+        store = MemoryStore(); queue = Queue(store); plane = V3ControlPlane(store, queue)
+        task = plane.register("github-issue-1-aaaaaaaaaaaaaaaa", spec())
+        binding = hashlib.sha256(json.dumps({"task_id": task.task_id, "spec_hash": task.spec.hash}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        authorized = plane.authorize(task.task_id, binding, "reviewer")
+        self.assertEqual(authorized.status, V3Status.AUTHORIZED)
+        self.assertEqual(queue.calls, 0)
+
     def test_changed_approval_context_cannot_reuse_task_id(self):
         store = MemoryStore(); plane = V3ControlPlane(store, Queue(store))
         plane.register("github-issue-1-aaaaaaaaaaaaaaaa", spec())

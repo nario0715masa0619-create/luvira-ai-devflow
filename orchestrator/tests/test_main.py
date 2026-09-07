@@ -77,20 +77,20 @@ class EventTest(unittest.TestCase):
         record = unittest.mock.Mock(execution_id="execution-1", attempt=1)
         report = unittest.mock.Mock(public_dict=lambda: {"passed": True, "checks": []})
         control_plane = unittest.mock.Mock()
-        control_plane.authorize_and_queue.return_value = (record, report)
+        control_plane.authorize.return_value = unittest.mock.Mock(task_id=task_id)
         with patch("main.V3_CONTROL_PLANE", control_plane):
             response = self.client.post(
-                f"/control-plane/v3/tasks/{task_id}/authorize-and-queue",
+                f"/control-plane/v3/tasks/{task_id}/authorize",
                 json={"approval_binding": approval_binding, "actor": "nario0715masa0619-create"},
             )
 
-        self.assertEqual(response.status_code, 202)
-        self.assertEqual(response.json["status"], "EXECUTION_QUEUED")
-        control_plane.authorize_and_queue.assert_called_once_with(task_id, approval_binding, "nario0715masa0619-create")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "AUTHORIZED")
+        control_plane.authorize.assert_called_once_with(task_id, approval_binding, "nario0715masa0619-create")
 
     def test_private_authorization_rejects_missing_binding(self):
         response = self.client.post(
-            "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize-and-queue",
+            "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize",
             json={"actor": "nario0715masa0619-create"},
         )
 
@@ -99,7 +99,7 @@ class EventTest(unittest.TestCase):
 
     def test_private_authorization_rejects_unsafe_actor(self):
         response = self.client.post(
-            "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize-and-queue",
+            "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize",
             json={"approval_binding": "b" * 64, "actor": "not an actor"},
         )
 
@@ -108,7 +108,7 @@ class EventTest(unittest.TestCase):
 
     def test_private_authorization_rejects_task_id_outside_control_plane_format(self):
         response = self.client.post(
-            "/control-plane/v3/tasks/task-26/authorize-and-queue",
+            "/control-plane/v3/tasks/task-26/authorize",
             json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"},
         )
 
@@ -116,7 +116,7 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.json["reason"], "task_id_invalid")
 
     def test_v3_authorize_queue_requires_private_runtime_wiring(self):
-        response = self.client.post("/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize-and-queue", json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"})
+        response = self.client.post("/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize", json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"})
 
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json["reason"], "v3_control_plane_not_configured")
