@@ -163,9 +163,9 @@ def control_plane_readiness():
     return jsonify(status="READY", backend="firestore", collection=V3_TASK_COLLECTION, lifecycle="v3-only")
 
 
-@app.post("/control-plane/v3/tasks/<task_id>/authorize-and-queue")
-def authorize_and_queue_v3_task(task_id):
-    """Commit one human decision and admit one v3 task through preflight."""
+@app.post("/control-plane/v3/tasks/<task_id>/authorize")
+def authorize_v3_task(task_id):
+    """Commit a human decision only; broker admission is asynchronous."""
     payload = request.get_json(silent=True) or {}
     approval_binding = payload.get("approval_binding")
     actor = payload.get("actor")
@@ -179,7 +179,7 @@ def authorize_and_queue_v3_task(task_id):
     if V3_CONTROL_PLANE is None:
         return jsonify(status="BLOCKED", reason="v3_control_plane_not_configured"), 503
     try:
-        record, report = V3_CONTROL_PLANE.authorize_and_queue(task_id, approval_binding, actor)
+        task = V3_CONTROL_PLANE.authorize(task_id, approval_binding, actor)
     except V3ControlPlaneError as exc:
         code = str(exc)
         status = 404 if code == "task_not_found" else 409 if code in {"approval_binding_mismatch", "authorization_not_reusable", "execution_preflight_failed", "queue_state_conflict"} else 503
@@ -187,15 +187,7 @@ def authorize_and_queue_v3_task(task_id):
     except Exception:
         logging.exception("V3_CONTROL_PLANE_BLOCKED queue request failed")
         return jsonify(status="BLOCKED", reason="v3_queue_unavailable"), 503
-    if report is None:
-        return jsonify(status="EXECUTION_QUEUED", task_id=task_id, execution_id=record.execution_id, attempt=record.attempt, idempotent=True), 202
-    return jsonify(
-        status="EXECUTION_QUEUED",
-        task_id=task_id,
-        execution_id=record.execution_id,
-        attempt=record.attempt,
-        preflight=report.public_dict(),
-    ), 202
+    return jsonify(status="AUTHORIZED", task_id=task.task_id), 200
 
 
 @app.post("/control-plane/tasks/<task_id>/bootstrap")
