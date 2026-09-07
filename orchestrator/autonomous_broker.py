@@ -1,0 +1,22 @@
+"""Autonomous admission loop: approval never depends on broker availability."""
+from execution_platform import V3Status
+
+
+class AutonomousBroker:
+    def __init__(self, tasks, queue):
+        self.tasks, self.queue = tasks, queue
+
+    def sweep(self):
+        """Attempt each eligible persisted task; retain approval on failure."""
+        outcomes = []
+        for task in self.tasks.eligible():
+            if task.status not in {V3Status.AUTHORIZED, V3Status.EXECUTION_FAILED_RETRYABLE}:
+                continue
+            try:
+                record, _ = self.queue.request(task.task_id)
+                outcomes.append((task.task_id, "QUEUED", record.execution_id))
+            except Exception as exc:
+                # A broker failure is recorded/alerted by its runner; critically,
+                # this method never revokes the durable human authorization.
+                outcomes.append((task.task_id, "RETRY_PENDING", type(exc).__name__))
+        return outcomes

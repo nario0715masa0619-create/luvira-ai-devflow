@@ -85,3 +85,10 @@ class FirestoreV3TaskStore:
 
     def readiness_check(self) -> None:
         list(self._collection.limit(1).stream())
+
+    def eligible(self):
+        """Read only tasks the autonomous broker may safely retry."""
+        for snapshot in self._collection.where("status", "in", [
+            V3Status.AUTHORIZED.value, V3Status.EXECUTION_FAILED_RETRYABLE.value,
+        ]).stream():
+            yield task_from_payload(snapshot.to_dict())
