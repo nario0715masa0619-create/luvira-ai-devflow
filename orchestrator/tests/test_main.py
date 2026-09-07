@@ -108,7 +108,7 @@ class EventTest(unittest.TestCase):
 
     def test_private_authorization_rejects_task_id_outside_control_plane_format(self):
         response = self.client.post(
-            "/control-plane/tasks/task-26/authorize",
+            "/control-plane/v3/tasks/task-26/authorize-and-queue",
             json={"approval_binding": "b" * 64, "actor": "nario0715masa0619-create"},
         )
 
