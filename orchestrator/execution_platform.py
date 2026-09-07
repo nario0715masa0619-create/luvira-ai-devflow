@@ -155,6 +155,10 @@ class ExecutionPlatform:
         self._tasks[task.task_id] = task
         return task
 
+    def get(self, task_id: str) -> V3Task:
+        """Read a task without performing a state transition."""
+        return self._task(task_id)
+
     def validate(self, task_id: str) -> V3Task:
         task = self._task(task_id, V3Status.DRAFT)
         task.status = V3Status.VALIDATED
@@ -212,6 +216,6 @@ class ExecutionPlatform:
             task = self._tasks[task_id]
         except KeyError as exc:
             raise TransitionRejected("task_not_found") from exc
-        if task.status not in statuses:
+        if statuses and task.status not in statuses:
             raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         return task
