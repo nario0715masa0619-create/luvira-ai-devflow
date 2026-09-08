@@ -3,8 +3,8 @@ from execution_platform import V3Status
 
 
 class AutonomousBroker:
-    def __init__(self, tasks, queue):
-        self.tasks, self.queue = tasks, queue
+    def __init__(self, tasks, queue, dispatcher=None):
+        self.tasks, self.queue, self.dispatcher = tasks, queue, dispatcher
 
     def sweep(self):
         """Attempt each eligible persisted task; retain approval on failure."""
@@ -14,7 +14,11 @@ class AutonomousBroker:
                 continue
             try:
                 record, _ = self.queue.request(task.task_id)
-                outcomes.append((task.task_id, "QUEUED", record.execution_id))
+                if self.dispatcher is None:
+                    outcomes.append((task.task_id, "QUEUED", record.execution_id))
+                    continue
+                worker_execution_id = self.dispatcher.dispatch(task.task_id, record.execution_id)
+                outcomes.append((task.task_id, "WORKER_STARTED", worker_execution_id))
             except Exception as exc:
                 # A broker failure is recorded/alerted by its runner; critically,
                 # this method never revokes the durable human authorization.

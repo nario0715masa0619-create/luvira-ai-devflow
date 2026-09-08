@@ -9,16 +9,19 @@ from google.cloud import firestore
 from google.cloud import run_v2
 
 from cloud_run_preflight import cloud_run_checkers
+from cloud_run_bootstrap_client import CloudRunBootstrapClient
 from durable_queue_service import DurableQueueService
 from execution_preflight import ExecutionPreflight, PreflightCheck
 from v3_task_store import FirestoreV3TaskStore
 from v3_transaction import V3Transaction
+from worker_dispatch_service import WorkerDispatchService
 
 
 @dataclass(frozen=True)
 class V3QueueRuntime:
     tasks: FirestoreV3TaskStore
     queue: DurableQueueService
+    dispatcher: WorkerDispatchService
 
 
 def create_v3_queue_service(
@@ -83,8 +86,13 @@ def create_v3_queue_service(
         provider_check,
     ))
     tasks = FirestoreV3TaskStore(firestore_client, task_collection)
-    return V3QueueRuntime(tasks, DurableQueueService(
+    transaction = V3Transaction(firestore_client, task_collection)
+    queue = DurableQueueService(
         tasks,
         preflight,
-        V3Transaction(firestore_client, task_collection),
-    ))
+        transaction,
+    )
+    dispatcher = WorkerDispatchService(
+        tasks, transaction, CloudRunBootstrapClient(project, region, worker_job),
+    )
+    return V3QueueRuntime(tasks, queue, dispatcher)
