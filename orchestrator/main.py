@@ -59,6 +59,8 @@ def create_v3_queue_from_environment():
         task_collection=V3_TASK_COLLECTION,
         artifact_boundary_available=lambda: bool(WORKER_ARTIFACT_BUCKET and WORKER_ARTIFACT_VIEW),
         provider_available=lambda: bool(os.environ.get("OPENCODE_GO_API_KEY")) and opencode_go_model_count(os.environ["OPENCODE_GO_API_KEY"]) > 0,
+        artifact_bucket=WORKER_ARTIFACT_BUCKET,
+        artifact_view=WORKER_ARTIFACT_VIEW,
     )
 
 
@@ -67,7 +69,7 @@ V3_QUEUE_SERVICE = V3_QUEUE_RUNTIME.queue if V3_QUEUE_RUNTIME else None
 V3_TASK_STORE = V3_QUEUE_RUNTIME.tasks if V3_QUEUE_RUNTIME else None
 V3_CONTROL_PLANE = V3ControlPlane(V3_TASK_STORE, V3_QUEUE_SERVICE) if V3_TASK_STORE and V3_QUEUE_SERVICE else None
 V3_AUTONOMOUS_BROKER = AutonomousBroker(
-    V3_TASK_STORE, V3_QUEUE_SERVICE, V3_QUEUE_RUNTIME.dispatcher,
+    V3_TASK_STORE, V3_QUEUE_SERVICE, V3_QUEUE_RUNTIME.dispatcher, V3_QUEUE_RUNTIME.reconciler,
 ) if V3_QUEUE_RUNTIME else None
 
 
