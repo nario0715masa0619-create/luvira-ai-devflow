@@ -48,6 +48,14 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         self.assertEqual(reconciler.sweep(), [("task", "WORKER_FAILED_RETRYABLE", "execution")])
         self.assertEqual(writes, [(V3Status.EXECUTION_FAILED_RETRYABLE, V3Status.EXECUTION_FAILED_RETRYABLE)])
 
+    def test_unaccepted_worker_start_is_safely_requeued(self):
+        task = running_task()
+        task.execution.external_operation_id = None
+        reconciler, writes = self.reconciler(task, "PENDING")
+        self.assertEqual(reconciler.sweep(), [("task", "WORKER_DISPATCH_RETRYABLE", "execution")])
+        self.assertEqual(task.execution.failure_code, "WORKER_DISPATCH_NOT_ACCEPTED_RETRYABLE")
+        self.assertEqual(writes, [(V3Status.EXECUTION_FAILED_RETRYABLE, V3Status.EXECUTION_FAILED_RETRYABLE)])
+
     def test_malformed_artifact_fails_closed(self):
         task = running_task()
         reconciler, writes = self.reconciler(task, "SUCCEEDED", "not an artifact")

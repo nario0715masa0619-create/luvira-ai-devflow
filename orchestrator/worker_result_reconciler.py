@@ -52,7 +52,21 @@ class WorkerResultReconciler:
                             record.external_operation_id = recovered
                             self._transaction.record_external_operation(task, record)
                         else:
-                            outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", record.execution_id))
+                            # The Worker API never accepted a matching
+                            # execution.  Retrying is safe: no isolated
+                            # Worker ran, so no provider call, source write,
+                            # or publication could have happened.  Without
+                            # this transition the durable RUNNING claim would
+                            # strand the task forever after a rejected start.
+                            ExecutionPlatform.fail_existing(
+                                task, record.execution_id,
+                                "WORKER_DISPATCH_NOT_ACCEPTED_RETRYABLE",
+                            )
+                            self._transaction.record_result(
+                                task, record,
+                                V3Status.EXECUTION_FAILED_RETRYABLE,
+                            )
+                            outcomes.append((task.task_id, "WORKER_DISPATCH_RETRYABLE", record.execution_id))
                             continue
                     except Exception:
                         outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", record.execution_id))
