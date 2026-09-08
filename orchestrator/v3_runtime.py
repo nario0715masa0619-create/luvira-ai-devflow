@@ -56,7 +56,11 @@ def create_v3_queue_service(
 
     def get_roles(check_project: str, check_region: str, job_name: str, service_account: str):
         resource = f"projects/{check_project}/locations/{check_region}/jobs/{job_name}"
-        policy = jobs.get_iam_policy(resource=resource)
+        # google-cloud-run 0.16 exposes IAM calls through the request object
+        # rather than flattened keyword fields.  Passing ``resource=`` caused
+        # the read-only identity preflight to fail before it could inspect the
+        # worker's existing least-privilege bindings.
+        policy = jobs.get_iam_policy(request={"resource": resource})
         member = f"serviceAccount:{service_account}"
         return [binding.role for binding in policy.bindings if member in binding.members]
 
