@@ -50,3 +50,16 @@ class V3TransactionTest(unittest.TestCase):
 
         self.transaction.update.assert_not_called()
         self.transaction.create.assert_not_called()
+
+    def test_claims_queued_execution_once_before_external_launch(self):
+        stored = self.queued
+        task_snapshot = Mock(exists=True)
+        task_snapshot.to_dict.return_value = task_payload(stored)
+        self.transaction.get.return_value = task_snapshot
+        self.queued.status = V3Status.EXECUTION_RUNNING
+        self.record.status = V3Status.EXECUTION_RUNNING
+
+        V3Transaction(self.client).begin_queued(self.queued, self.record)
+
+        self.transaction.update.assert_called_once()
+        self.assertEqual(self.queued.revision, 2)

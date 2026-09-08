@@ -77,3 +77,11 @@ class ExecutionPlatformTest(unittest.TestCase):
         with self.assertRaisesRegex(TransitionRejected, "execution_identity_mismatch"):
             platform.begin(task.task_id, "other")
         self.assertEqual(task.status, V3Status.EXECUTION_QUEUED)
+
+    def test_loaded_queued_execution_can_be_claimed_once(self):
+        platform, task = self.authorized()
+        execution = platform.queue(task.task_id, [True])
+        ExecutionPlatform.begin_existing(task, execution.execution_id)
+        self.assertEqual(task.status, V3Status.EXECUTION_RUNNING)
+        with self.assertRaisesRegex(TransitionRejected, "invalid_transition"):
+            ExecutionPlatform.begin_existing(task, execution.execution_id)

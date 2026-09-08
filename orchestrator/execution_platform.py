@@ -209,6 +209,13 @@ class ExecutionPlatform:
 
     def begin(self, task_id: str, execution_id: str) -> ExecutionRecord:
         task = self._task(task_id, V3Status.EXECUTION_QUEUED)
+        return self.begin_existing(task, execution_id)
+
+    @staticmethod
+    def begin_existing(task: V3Task, execution_id: str) -> ExecutionRecord:
+        """Claim one loaded queued execution before an external launch."""
+        if task.status is not V3Status.EXECUTION_QUEUED:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if task.execution is None or task.execution.execution_id != execution_id:
             raise TransitionRejected("execution_identity_mismatch")
         task.execution.status = V3Status.EXECUTION_RUNNING
