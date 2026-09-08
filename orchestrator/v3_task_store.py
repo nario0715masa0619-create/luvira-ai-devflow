@@ -83,6 +83,18 @@ class FirestoreV3TaskStore:
         reference.update(payload, option=firestore.LastUpdateOption(snapshot.update_time))
         task.revision += 1
 
+    def pending_for_issue(self, issue_number: int) -> V3Task:
+        candidates = []
+        for snapshot in self._collection.where(
+            "spec.approval_context.source.issue_number", "==", issue_number
+        ).stream():
+            task = task_from_payload(snapshot.to_dict())
+            if task.status is V3Status.AWAITING_HUMAN_APPROVAL:
+                candidates.append(task)
+        if len(candidates) != 1:
+            raise V3TaskStoreError("v3_task_not_found")
+        return candidates[0]
+
     def readiness_check(self) -> None:
         list(self._collection.limit(1).stream())
 

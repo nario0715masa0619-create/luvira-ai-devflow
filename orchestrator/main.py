@@ -201,6 +201,19 @@ def authorize_v3_task(task_id):
     return jsonify(status="AUTHORIZED", task_id=task.task_id), 200
 
 
+@app.get("/control-plane/v3/approval-issues/<int:issue_number>/pending")
+def pending_approval_issue(issue_number):
+    """Resolve server-side approval facts; callers never reconstruct hashes."""
+    if V3_CONTROL_PLANE is None:
+        return jsonify(status="BLOCKED", reason="v3_control_plane_not_configured"), 503
+    try:
+        task = V3_CONTROL_PLANE.pending_for_issue(issue_number)
+    except V3ControlPlaneError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 404
+    return jsonify(status="AWAITING_HUMAN_APPROVAL", task_id=task.task_id,
+                   approval_binding=task.approval_binding), 200
+
+
 @app.post("/internal/broker/sweep")
 def sweep_v3_broker():
     """Admit eligible durable tasks; called by authenticated Cloud Scheduler."""

@@ -26,6 +26,10 @@ class MemoryStore:
         if task_id not in self.tasks: raise ValueError("v3_task_not_found")
         return self.tasks[task_id]
     def save(self, task): task.revision += 1; self.tasks[task.task_id] = task
+    def pending_for_issue(self, issue_number):
+        matches = [task for task in self.tasks.values() if task.spec.approval_context.get("source", {}).get("issue_number") == issue_number and task.status is V3Status.AWAITING_HUMAN_APPROVAL]
+        if len(matches) != 1: raise ValueError("v3_task_not_found")
+        return matches[0]
 
 
 class Queue:
@@ -75,6 +79,11 @@ class V3ControlPlaneTest(unittest.TestCase):
         changed = spec(); changed["approval_context"]["approval"] = "write source"
         with self.assertRaisesRegex(V3ControlPlaneError, "different_spec"):
             plane.register("github-issue-1-aaaaaaaaaaaaaaaa", changed)
+
+    def test_resolves_pending_task_by_issue_without_reconstructing_hash(self):
+        store = MemoryStore(); plane = V3ControlPlane(store, Queue(store))
+        task = plane.register("github-issue-1-aaaaaaaaaaaaaaaa", spec())
+        self.assertIs(plane.pending_for_issue(1), task)
 
     def test_concurrent_webhook_delivery_reloads_the_winning_task(self):
         store = MemoryStore(); plane = V3ControlPlane(store, Queue(store))

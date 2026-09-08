@@ -97,6 +97,16 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json["reason"], "approval_binding_required")
 
+    def test_pending_approval_issue_returns_server_owned_task_facts(self):
+        task = unittest.mock.Mock(task_id="github-issue-26-aaaaaaaaaaaaaaaa", approval_binding="b" * 64)
+        control_plane = unittest.mock.Mock()
+        control_plane.pending_for_issue.return_value = task
+        with patch("main.V3_CONTROL_PLANE", control_plane):
+            response = self.client.get("/control-plane/v3/approval-issues/26/pending")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["task_id"], task.task_id)
+        control_plane.pending_for_issue.assert_called_once_with(26)
+
     def test_private_authorization_rejects_unsafe_actor(self):
         response = self.client.post(
             "/control-plane/v3/tasks/github-issue-26-aaaaaaaaaaaaaaaa/authorize",
