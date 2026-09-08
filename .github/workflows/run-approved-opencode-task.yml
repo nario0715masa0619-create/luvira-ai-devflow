@@ -45,6 +45,19 @@ jobs:
 
       - uses: google-github-actions/setup-gcloud@v2
 
+      - name: Mint dedicated Worker App token for branch and PR creation
+        shell: bash
+        env:
+          GITHUB_WORKER_APP_ID: '4823016'
+          GITHUB_WORKER_INSTALLATION_ID: '158901090'
+        run: |
+          token="$(gcloud secrets versions access latest \
+            --secret github-app-luvirai-worker-private-key \
+            --project luvira-ai-control-plane \
+            | node .github/scripts/mint-worker-app-token.mjs)"
+          test -n "$token"
+          echo "GITHUB_TOKEN=$token" >> "$GITHUB_ENV"
+
       - name: Create an ephemeral OpenCode Go configuration
         shell: bash
         run: |
@@ -100,7 +113,7 @@ jobs:
       - name: Implement the approved Issue as a pull request
         uses: anomalyco/opencode/github@77fc88c8ade8e5a620ebbe1197f3a572d29ae91a
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
         with:
           model: opencode-go/kimi-k2.6
           use_github_token: true
