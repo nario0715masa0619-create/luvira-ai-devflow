@@ -217,10 +217,26 @@ class ExecutionPlatform:
         return task.execution
 
     def fail(self, task_id: str, execution_id: str, status_code: int | None, *, timeout: bool = False) -> V3Task:
+        return self._fail_with_code(
+            task_id,
+            execution_id,
+            classify_external_failure(status_code, timeout=timeout),
+        )
+
+    def fail_opencode(self, task_id: str, execution_id: str, status_code: int | None, body: str | None = None, *, timeout: bool = False) -> V3Task:
+        """Record the one OpenCode provider outcome without storing its body."""
+        from opencode_provider_policy import classify_opencode_failure
+
+        return self._fail_with_code(
+            task_id,
+            execution_id,
+            classify_opencode_failure(status_code, body, timeout=timeout),
+        )
+
+    def _fail_with_code(self, task_id: str, execution_id: str, code: str) -> V3Task:
         task = self._task(task_id, V3Status.EXECUTION_RUNNING)
         if task.execution is None or task.execution.execution_id != execution_id:
             raise TransitionRejected("execution_identity_mismatch")
-        code = classify_external_failure(status_code, timeout=timeout)
         task.execution.failure_code = code
         task.execution.status = V3Status.EXECUTION_FAILED_RETRYABLE if code.endswith("RETRYABLE") else V3Status.EXECUTION_FAILED_FINAL
         task.status = task.execution.status

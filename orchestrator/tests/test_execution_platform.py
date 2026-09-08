@@ -56,6 +56,21 @@ class ExecutionPlatformTest(unittest.TestCase):
         self.assertEqual(classify_external_failure(409), "HTTP_409_RETRYABLE")
         self.assertEqual(classify_external_failure(None, timeout=True), "EXTERNAL_TIMEOUT_RETRYABLE")
 
+    def test_opencode_zen_budget_failure_is_final_not_a_scheduler_retry(self):
+        platform, task = self.authorized()
+        execution = platform.queue(task.task_id, [True])
+        platform.begin(task.task_id, execution.execution_id)
+
+        failed = platform.fail_opencode(
+            task.task_id,
+            execution.execution_id,
+            429,
+            "Zen balance monthly limit reached",
+        )
+
+        self.assertEqual(failed.status, V3Status.EXECUTION_FAILED_FINAL)
+        self.assertEqual(failed.execution.failure_code, "OPENCODE_BUDGET_EXHAUSTED_FINAL")
+
     def test_wrong_execution_cannot_change_task_state(self):
         platform, task = self.authorized()
         execution = platform.queue(task.task_id, [True])
