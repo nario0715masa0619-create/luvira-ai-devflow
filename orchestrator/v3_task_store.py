@@ -97,3 +97,8 @@ class FirestoreV3TaskStore:
         """Read claimed executions for result reconciliation only."""
         for snapshot in self._collection.where("status", "==", V3Status.EXECUTION_RUNNING.value).stream():
             yield task_from_payload(snapshot.to_dict())
+
+    def worker_health_verified(self):
+        """Tasks eligible for exactly one Broker-held implementation request."""
+        for snapshot in self._collection.where("status", "==", V3Status.WORKER_HEALTH_VERIFIED.value).stream():
+            yield task_from_payload(snapshot.to_dict())

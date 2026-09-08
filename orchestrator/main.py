@@ -38,6 +38,7 @@ WORKER_JOB = os.environ.get("ISOLATED_WORKER_JOB", "luvira-devflow-isolated-work
 WORKER_REGION = os.environ.get("ISOLATED_WORKER_REGION", "us-central1")
 WORKER_ARTIFACT_BUCKET = os.environ.get("ISOLATED_WORKER_ARTIFACT_BUCKET", "luvira-devflow-bootstrap-results")
 WORKER_ARTIFACT_VIEW = os.environ.get("ISOLATED_WORKER_ARTIFACT_VIEW", "bootstrap-results")
+OPENCODE_IMPLEMENTATION_MODEL = os.environ.get("OPENCODE_IMPLEMENTATION_MODEL", "kimi-k2.6").strip()
 # The protected human-approval workflow is the sole external trigger for the
 # Broker.  It already has Cloud Run Invoker and an immutable approval binding.
 BOOTSTRAP_CALLER_EMAIL = os.environ.get("BOOTSTRAP_CALLER_EMAIL", "devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com")
@@ -59,6 +60,9 @@ def create_v3_queue_from_environment():
         task_collection=V3_TASK_COLLECTION,
         artifact_boundary_available=lambda: bool(WORKER_ARTIFACT_BUCKET and WORKER_ARTIFACT_VIEW),
         provider_available=lambda: bool(os.environ.get("OPENCODE_GO_API_KEY")) and opencode_go_model_count(os.environ["OPENCODE_GO_API_KEY"]) > 0,
+        implementation_api_key=os.environ.get("OPENCODE_GO_API_KEY", ""),
+        implementation_model=OPENCODE_IMPLEMENTATION_MODEL,
+        source_token_for_repository=lambda _repository: github_worker_installation_token(),
         artifact_bucket=WORKER_ARTIFACT_BUCKET,
         artifact_view=WORKER_ARTIFACT_VIEW,
     )
@@ -70,6 +74,7 @@ V3_TASK_STORE = V3_QUEUE_RUNTIME.tasks if V3_QUEUE_RUNTIME else None
 V3_CONTROL_PLANE = V3ControlPlane(V3_TASK_STORE, V3_QUEUE_SERVICE) if V3_TASK_STORE and V3_QUEUE_SERVICE else None
 V3_AUTONOMOUS_BROKER = AutonomousBroker(
     V3_TASK_STORE, V3_QUEUE_SERVICE, V3_QUEUE_RUNTIME.dispatcher, V3_QUEUE_RUNTIME.reconciler,
+    V3_QUEUE_RUNTIME.implementation,
 ) if V3_QUEUE_RUNTIME else None
 
 
@@ -433,18 +438,29 @@ def github_default_branch_sha(repository):
     private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
     if not app_id or not installation_id or not private_key:
         raise ValueError("github_worker_not_configured")
-    now_epoch = int(time.time())
-    app_jwt = jwt.encode({"iat": now_epoch - 60, "exp": now_epoch + 540, "iss": app_id}, private_key, algorithm="RS256")
-    installation_token = github_api_request(
-        f"{GITHUB_API_URL}/app/installations/{installation_id}/access_tokens", method="POST", token=app_jwt
-    ).get("token")
-    if not isinstance(installation_token, str):
-        raise ValueError("invalid_installation_token")
+    installation_token = github_worker_installation_token()
     ref = github_api_request(f"{GITHUB_API_URL}/repos/{repository}/git/ref/heads/main", token=installation_token)
     sha = (ref.get("object") or {}).get("sha")
     if not isinstance(sha, str) or not sha:
         raise ValueError("invalid_base_commit")
     return sha
+
+
+def github_worker_installation_token():
+    """Mint a short-lived token for the configured App only when a read is due."""
+    app_id = os.environ.get("GITHUB_WORKER_APP_ID", "")
+    installation_id = os.environ.get("GITHUB_WORKER_INSTALLATION_ID", "")
+    private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
+    if not app_id or not installation_id or not private_key:
+        raise ValueError("github_worker_not_configured")
+    now_epoch = int(time.time())
+    app_jwt = jwt.encode({"iat": now_epoch - 60, "exp": now_epoch + 540, "iss": app_id}, private_key, algorithm="RS256")
+    token = github_api_request(
+        f"{GITHUB_API_URL}/app/installations/{installation_id}/access_tokens", method="POST", token=app_jwt
+    ).get("token")
+    if not isinstance(token, str) or not token:
+        raise ValueError("invalid_installation_token")
+    return token
 
 
 def opencode_go_model_count(api_key):

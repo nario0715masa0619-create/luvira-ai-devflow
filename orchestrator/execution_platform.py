@@ -37,6 +37,8 @@ class V3Status(str, Enum):
     EXECUTION_RUNNING = "EXECUTION_RUNNING"
     EXECUTION_FAILED_RETRYABLE = "EXECUTION_FAILED_RETRYABLE"
     EXECUTION_FAILED_FINAL = "EXECUTION_FAILED_FINAL"
+    WORKER_HEALTH_VERIFIED = "WORKER_HEALTH_VERIFIED"
+    IMPLEMENTATION_GENERATING = "IMPLEMENTATION_GENERATING"
     ARTIFACT_VERIFIED = "ARTIFACT_VERIFIED"
     REVIEWING = "REVIEWING"
     READY_TO_PUBLISH = "READY_TO_PUBLISH"
@@ -247,7 +249,7 @@ class ExecutionPlatform:
     @staticmethod
     def fail_existing(task: V3Task, execution_id: str, code: str) -> V3Task:
         """Record a classified result on an already loaded running task."""
-        if task.status is not V3Status.EXECUTION_RUNNING:
+        if task.status not in {V3Status.EXECUTION_RUNNING, V3Status.IMPLEMENTATION_GENERATING}:
             raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if task.execution is None or task.execution.execution_id != execution_id:
             raise TransitionRejected("execution_identity_mismatch")
@@ -260,9 +262,33 @@ class ExecutionPlatform:
         return task
 
     @staticmethod
-    def verify_existing(task: V3Task, execution_id: str) -> V3Task:
-        """Advance only a running execution whose result passed verification."""
+    def verify_worker_health_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Record the credential-free Worker health proof, not an AI result."""
         if task.status is not V3Status.EXECUTION_RUNNING:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        task.execution.status = V3Status.WORKER_HEALTH_VERIFIED
+        task.status = V3Status.WORKER_HEALTH_VERIFIED
+        task.audit.append("WORKER_HEALTH_VERIFIED")
+        return task
+
+    @staticmethod
+    def begin_implementation_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Durably claim the one provider request before spending provider quota."""
+        if task.status is not V3Status.WORKER_HEALTH_VERIFIED:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        task.execution.status = V3Status.IMPLEMENTATION_GENERATING
+        task.status = V3Status.IMPLEMENTATION_GENERATING
+        task.audit.append("IMPLEMENTATION_GENERATING")
+        return task
+
+    @staticmethod
+    def verify_implementation_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Advance only the claimed provider request after artifact verification."""
+        if task.status is not V3Status.IMPLEMENTATION_GENERATING:
             raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if task.execution is None or task.execution.execution_id != execution_id:
             raise TransitionRejected("execution_identity_mismatch")
@@ -270,6 +296,14 @@ class ExecutionPlatform:
         task.status = V3Status.ARTIFACT_VERIFIED
         task.audit.append("ARTIFACT_VERIFIED")
         return task
+
+    @staticmethod
+    def fail_implementation_existing(task: V3Task, execution_id: str, code: str) -> V3Task:
+        if task.status is not V3Status.IMPLEMENTATION_GENERATING:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        return ExecutionPlatform.fail_existing(task, execution_id, code)
 
     def _task(self, task_id: str, *statuses: V3Status) -> V3Task:
         try:

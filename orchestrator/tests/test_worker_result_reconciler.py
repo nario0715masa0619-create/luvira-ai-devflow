@@ -39,8 +39,8 @@ class WorkerResultReconcilerTest(unittest.TestCase):
     def test_completed_worker_is_verified_without_restarting_it(self):
         task = running_task()
         reconciler, writes = self.reconciler(task, "SUCCEEDED", artifact_line(task))
-        self.assertEqual(reconciler.sweep(), [("task", "ARTIFACT_VERIFIED", "run-123")])
-        self.assertEqual(writes, [(V3Status.ARTIFACT_VERIFIED, V3Status.ARTIFACT_VERIFIED)])
+        self.assertEqual(reconciler.sweep(), [("task", "WORKER_HEALTH_VERIFIED", "run-123")])
+        self.assertEqual(writes, [(V3Status.WORKER_HEALTH_VERIFIED, V3Status.WORKER_HEALTH_VERIFIED)])
 
     def test_failed_bootstrap_worker_is_safely_queued_for_a_new_attempt(self):
         task = running_task()
