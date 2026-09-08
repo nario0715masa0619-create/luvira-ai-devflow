@@ -1,7 +1,18 @@
 name: Deploy Luvira DevFlow orchestrator
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "orchestrator/**"
+      - ".github/workflows/deploy-orchestrator.yml"
   workflow_dispatch:
+
+# Never cancel an already verified deployment halfway through.  A later main
+# commit queues behind it and becomes the next immutable Cloud Run revision.
+concurrency:
+  group: deploy-luvira-devflow-orchestrator-main
+  cancel-in-progress: false
 
 permissions:
   contents: read
