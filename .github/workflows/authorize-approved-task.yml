@@ -3,14 +3,10 @@ name: Authorize approved DevFlow task
 on:
   workflow_dispatch:
     inputs:
-      task_id:
-        description: Firestore task ID returned by the approved Issue Form
+      issue_number:
+        description: GitHub approval Issue number; task facts are resolved server-side
         required: true
-        type: string
-      approval_binding:
-        description: Immutable approval binding returned by the Control Plane
-        required: true
-        type: string
+        type: number
 
 permissions:
   contents: read
@@ -55,11 +51,17 @@ jobs:
         env:
           ID_TOKEN: ${{ steps.request_auth.outputs.id_token }}
           ORCHESTRATOR_URL: ${{ steps.orchestrator.outputs.url }}
-          TASK_ID: ${{ inputs.task_id }}
-          APPROVAL_BINDING: ${{ inputs.approval_binding }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
           ACTOR: ${{ github.actor }}
         run: |
           set -euo pipefail
+          pending="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $ID_TOKEN" \
+            "$ORCHESTRATOR_URL/control-plane/v3/approval-issues/$ISSUE_NUMBER/pending")"
+          test "$(jq --raw-output '.status' <<<"$pending")" = "AWAITING_HUMAN_APPROVAL"
+          TASK_ID="$(jq --raw-output '.task_id' <<<"$pending")"
+          APPROVAL_BINDING="$(jq --raw-output '.approval_binding' <<<"$pending")"
+          test "$TASK_ID" != "null" && test "$APPROVAL_BINDING" != "null"
           body="$(jq -n --arg approval_binding "$APPROVAL_BINDING" --arg actor "$ACTOR" '{approval_binding: $approval_binding, actor: $actor}')"
           response="$(curl --fail --silent --show-error \
             --header "Authorization: Bearer $ID_TOKEN" \

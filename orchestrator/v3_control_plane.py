@@ -23,6 +23,7 @@ class V3TaskStore(Protocol):
     def create(self, task: V3Task) -> None: ...
     def get(self, task_id: str) -> V3Task: ...
     def save(self, task: V3Task) -> None: ...
+    def pending_for_issue(self, issue_number: int) -> V3Task: ...
 
 
 def _binding(task_id: str, spec: TaskSpec) -> str:
@@ -108,4 +109,14 @@ class V3ControlPlane:
             self.tasks.save(task)
         elif task.status not in {V3Status.AUTHORIZED, V3Status.EXECUTION_QUEUED, V3Status.EXECUTION_RUNNING}:
             raise V3ControlPlaneError("authorization_not_reusable")
+        return task
+
+    def pending_for_issue(self, issue_number: int) -> V3Task:
+        """Resolve the one immutable task owned by an approval Issue."""
+        try:
+            task = self.tasks.pending_for_issue(issue_number)
+        except Exception as exc:
+            raise V3ControlPlaneError("task_not_found") from exc
+        if task.status is not V3Status.AWAITING_HUMAN_APPROVAL:
+            raise V3ControlPlaneError("task_not_pending_human_approval")
         return task

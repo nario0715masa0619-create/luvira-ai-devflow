@@ -30,6 +30,10 @@ def main() -> None:
     require(workflow, f"service_account: {contract['service_account']}", "dedicated service account")
     require(workflow, "gcloud run services describe", "canonical Cloud Run endpoint discovery")
     require(workflow, "${{ steps.orchestrator.outputs.url }}", "discovered ID-token audience")
+    require(workflow, "issue_number:", "server-owned approval Issue input")
+    require(workflow, "/control-plane/v3/approval-issues/$ISSUE_NUMBER/pending", "server-side task resolution")
+    if "approval_binding:" in workflow or "task_id:" in workflow:
+        raise SystemExit("human-approval workflow must not accept reconstructed task facts")
     if "ORCHESTRATOR_URL: https://" in workflow:
         raise SystemExit("human-approval workflow must not hard-code a Cloud Run endpoint")
     if "github-deployer" in workflow or "devflow-deployer@" in workflow:
