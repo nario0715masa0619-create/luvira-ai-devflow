@@ -62,7 +62,12 @@ class CloudRunBootstrapClient:
         for execution in payload.get("executions", []):
             if not isinstance(execution, dict):
                 continue
-            containers = ((execution.get("template") or {}).get("template") or {}).get("containers") or []
+            template = execution.get("template") or {}
+            # Job and Execution responses use adjacent v2 shapes: executions
+            # expose containers directly, while some API versions wrap them in
+            # an additional template field.  Read both without widening the
+            # matching criteria.
+            containers = template.get("containers") or (template.get("template") or {}).get("containers") or []
             for container in containers:
                 for env in (container.get("env", []) if isinstance(container, dict) else []):
                     if not isinstance(env, dict) or env.get("name") != "WORKER_ENVELOPE_B64":
