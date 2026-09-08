@@ -80,9 +80,9 @@ class WorkerResultReconciler:
                 envelope = from_running_task(task)
                 artifact_bytes = extract_bootstrap_artifact(self._logs.read_stdout(record.external_operation_id))
                 self._handoff.receive_from_broker(record.external_operation_id, envelope, artifact_bytes)
-                ExecutionPlatform.verify_existing(task, record.execution_id)
-                self._transaction.record_result(task, record, V3Status.ARTIFACT_VERIFIED)
-                outcomes.append((task.task_id, "ARTIFACT_VERIFIED", record.external_operation_id))
+                ExecutionPlatform.verify_worker_health_existing(task, record.execution_id)
+                self._transaction.record_result(task, record, V3Status.WORKER_HEALTH_VERIFIED)
+                outcomes.append((task.task_id, "WORKER_HEALTH_VERIFIED", record.external_operation_id))
             except Exception:
                 # Artifact integrity failures are not retried automatically:
                 # repeated reads must never turn untrusted bytes into a result.

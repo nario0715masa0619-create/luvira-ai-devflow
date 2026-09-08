@@ -125,12 +125,35 @@ class V3Transaction:
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
-            if (stored.status is not V3Status.EXECUTION_RUNNING
+            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.IMPLEMENTATION_GENERATING}
                     or stored.execution is None
                     or stored.execution.execution_id != record.execution_id
                     or stored.execution.external_operation_id != record.external_operation_id
                     or stored.revision != task.revision):
                 raise V3TransactionError("v3_execution_result_not_recordable")
+            payload = task_payload(task)
+            payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
+
+        self._run_transaction(write)
+        task.revision += 1
+
+    def claim_implementation(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Persist the provider-spend claim before the Broker calls OpenCode."""
+        if task.status is not V3Status.IMPLEMENTATION_GENERATING or task.execution is not record:
+            raise V3TransactionError("implementation_not_claimed")
+        task_ref = self.tasks.document(task.task_id)
+
+        def write(transaction: Any) -> None:
+            snapshot = task_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(snapshot.to_dict())
+            if (stored.status is not V3Status.WORKER_HEALTH_VERIFIED
+                    or stored.execution is None
+                    or stored.execution.execution_id != record.execution_id
+                    or stored.revision != task.revision):
+                raise V3TransactionError("implementation_not_claimable")
             payload = task_payload(task)
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)

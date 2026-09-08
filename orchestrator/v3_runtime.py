@@ -12,12 +12,16 @@ from cloud_run_preflight import cloud_run_checkers
 from cloud_run_bootstrap_client import CloudRunBootstrapClient
 from cloud_run_bootstrap_client import CloudLoggingBootstrapReader
 from artifact_handoff import ArtifactHandoff, FirestoreVerifiedArtifactStore
+from implementation_artifact_handoff import FirestoreImplementationArtifactStore, ImplementationArtifactHandoff
 from durable_queue_service import DurableQueueService
 from execution_preflight import ExecutionPreflight, PreflightCheck
 from v3_task_store import FirestoreV3TaskStore
 from v3_transaction import V3Transaction
 from worker_dispatch_service import WorkerDispatchService
 from worker_result_reconciler import WorkerResultReconciler
+from github_readonly_source import GitHubReadOnlySource
+from implementation_execution_service import ImplementationExecutionService
+from opencode_implementation_client import OpenCodeImplementationClient
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,7 @@ class V3QueueRuntime:
     queue: DurableQueueService
     dispatcher: WorkerDispatchService
     reconciler: WorkerResultReconciler
+    implementation: ImplementationExecutionService
 
 
 def create_v3_queue_service(
@@ -37,9 +42,13 @@ def create_v3_queue_service(
     task_collection: str,
     artifact_boundary_available: Callable[[], bool],
     provider_available: Callable[[], bool],
+    implementation_api_key: str,
+    implementation_model: str,
+    source_token_for_repository: Callable[[str], str],
     artifact_bucket: str = "luvira-devflow-bootstrap-results",
     artifact_view: str = "bootstrap-results",
     artifact_collection: str = "devflow_verified_artifacts",
+    implementation_artifact_collection: str = "devflow_verified_implementation_artifacts",
 ) -> V3QueueRuntime:
     """Compose only read checks plus the durable queue; never a launcher."""
     firestore_client = firestore.Client()
@@ -110,4 +119,15 @@ def create_v3_queue_service(
         CloudLoggingBootstrapReader(project, region, artifact_bucket, artifact_view),
         ArtifactHandoff(FirestoreVerifiedArtifactStore(firestore_client, artifact_collection)),
     )
-    return V3QueueRuntime(tasks, queue, dispatcher, reconciler)
+    implementation = ImplementationExecutionService(
+        tasks, transaction,
+        lambda task: GitHubReadOnlySource(
+            task.spec.repository, source_token_for_repository(task.spec.repository),
+        ).snapshot(task.spec.base_commit, task.spec.allowed_paths),
+        OpenCodeImplementationClient(implementation_api_key),
+        implementation_model,
+        ImplementationArtifactHandoff(FirestoreImplementationArtifactStore(
+            firestore_client, implementation_artifact_collection,
+        )),
+    )
+    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation)
