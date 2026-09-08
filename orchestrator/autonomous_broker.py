@@ -1,5 +1,5 @@
 """Autonomous admission loop: approval never depends on broker availability."""
-from execution_platform import V3Status
+from execution_platform import ExecutionPlatformError, V3Status
 
 
 class AutonomousBroker:
@@ -24,5 +24,9 @@ class AutonomousBroker:
             except Exception as exc:
                 # A broker failure is recorded/alerted by its runner; critically,
                 # this method never revokes the durable human authorization.
-                outcomes.append((task.task_id, "RETRY_PENDING", type(exc).__name__))
+                # Domain errors contain only stable public codes.  Unexpected
+                # exceptions are reduced to their type so no sensitive detail
+                # can reach scheduler logs.
+                detail = str(exc) if isinstance(exc, ExecutionPlatformError) else type(exc).__name__
+                outcomes.append((task.task_id, "RETRY_PENDING", detail))
         return outcomes
