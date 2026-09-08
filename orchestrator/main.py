@@ -17,6 +17,7 @@ from google.oauth2 import id_token
 from v3_runtime import create_v3_queue_service
 from v3_control_plane import V3ControlPlane, V3ControlPlaneError
 from execution_platform import V3Status, task_spec_hash
+from autonomous_broker import AutonomousBroker
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -65,6 +66,7 @@ V3_QUEUE_RUNTIME = create_v3_queue_from_environment()
 V3_QUEUE_SERVICE = V3_QUEUE_RUNTIME.queue if V3_QUEUE_RUNTIME else None
 V3_TASK_STORE = V3_QUEUE_RUNTIME.tasks if V3_QUEUE_RUNTIME else None
 V3_CONTROL_PLANE = V3ControlPlane(V3_TASK_STORE, V3_QUEUE_SERVICE) if V3_TASK_STORE and V3_QUEUE_SERVICE else None
+V3_AUTONOMOUS_BROKER = AutonomousBroker(V3_TASK_STORE, V3_QUEUE_SERVICE) if V3_TASK_STORE and V3_QUEUE_SERVICE else None
 
 
 @app.before_request
@@ -188,6 +190,23 @@ def authorize_v3_task(task_id):
         logging.exception("V3_CONTROL_PLANE_BLOCKED queue request failed")
         return jsonify(status="BLOCKED", reason="v3_queue_unavailable"), 503
     return jsonify(status="AUTHORIZED", task_id=task.task_id), 200
+
+
+@app.post("/internal/broker/sweep")
+def sweep_v3_broker():
+    """Admit eligible durable tasks; called by authenticated Cloud Scheduler."""
+    if V3_AUTONOMOUS_BROKER is None:
+        return jsonify(status="BLOCKED", reason="v3_broker_not_configured"), 503
+    try:
+        outcomes = V3_AUTONOMOUS_BROKER.sweep()
+    except Exception:
+        logging.exception("V3_BROKER_SWEEP_FAILED")
+        return jsonify(status="RETRY_PENDING"), 503
+    return jsonify(
+        status="OK",
+        outcomes=[{"task_id": task_id, "status": status, "execution_id": execution_id}
+                  for task_id, status, execution_id in outcomes],
+    ), 200
 
 
 @app.post("/control-plane/tasks/<task_id>/bootstrap")

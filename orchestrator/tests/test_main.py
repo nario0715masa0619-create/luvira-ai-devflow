@@ -121,6 +121,21 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json["reason"], "v3_control_plane_not_configured")
 
+    def test_scheduler_broker_sweep_returns_durable_outcomes(self):
+        broker = unittest.mock.Mock()
+        broker.sweep.return_value = [("github-issue-26-aaaaaaaaaaaaaaaa", "QUEUED", "execution-1")]
+        with patch("main.V3_AUTONOMOUS_BROKER", broker):
+            response = self.client.post("/internal/broker/sweep")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "OK")
+        self.assertEqual(response.json["outcomes"][0]["execution_id"], "execution-1")
+
+    def test_scheduler_broker_sweep_fails_closed_without_runtime(self):
+        with patch("main.V3_AUTONOMOUS_BROKER", None):
+            response = self.client.post("/internal/broker/sweep")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json["reason"], "v3_broker_not_configured")
+
     def test_legacy_bootstrap_is_disabled_before_any_identity_or_worker_access(self):
         task_id = "github-issue-26-aaaaaaaaaaaaaaaa"
         response = self.client.post(f"/control-plane/tasks/{task_id}/bootstrap", json={"allowed_paths": ["README.md"]})
