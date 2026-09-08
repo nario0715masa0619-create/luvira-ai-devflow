@@ -44,30 +44,6 @@ jobs:
         run: |
           echo "url=$(gcloud run services describe luvira-devflow-orchestrator \
             --region us-central1 --format='value(status.url)')" >> "$GITHUB_OUTPUT"
-      - name: Configure the autonomous broker trigger
-        env:
-          SERVICE_URL: ${{ steps.deployed-service.outputs.url }}
-          BROKER_SERVICE_ACCOUNT: devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com
-        run: |
-          set -euo pipefail
-          gcloud services enable cloudscheduler.googleapis.com --quiet
-          gcloud run services add-iam-policy-binding luvira-devflow-orchestrator \
-            --region us-central1 \
-            --member "serviceAccount:$BROKER_SERVICE_ACCOUNT" \
-            --role roles/run.invoker --quiet
-          if gcloud scheduler jobs describe luvira-devflow-autonomous-broker --location us-central1 >/dev/null 2>&1; then
-            gcloud scheduler jobs update http luvira-devflow-autonomous-broker \
-              --location us-central1 --schedule '*/2 * * * *' --time-zone UTC \
-              --uri "$SERVICE_URL/internal/broker/sweep" --http-method POST \
-              --oidc-service-account-email "$BROKER_SERVICE_ACCOUNT" \
-              --oidc-token-audience "$SERVICE_URL" --quiet
-          else
-            gcloud scheduler jobs create http luvira-devflow-autonomous-broker \
-              --location us-central1 --schedule '*/2 * * * *' --time-zone UTC \
-              --uri "$SERVICE_URL/internal/broker/sweep" --http-method POST \
-              --oidc-service-account-email "$BROKER_SERVICE_ACCOUNT" \
-              --oidc-token-audience "$SERVICE_URL" --quiet
-          fi
       - name: Mint Cloud Run ID token
         id: control-plane-token
         uses: google-github-actions/auth@v2
