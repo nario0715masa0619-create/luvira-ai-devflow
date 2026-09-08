@@ -1,11 +1,5 @@
 name: Authorize approved DevFlow task
 
-env:
-  # Use Cloud Run's canonical service URL for both the ID-token audience and
-  # request host.  Revision aliases are accepted by Cloud Run IAM but are not
-  # a stable application-level audience.
-  ORCHESTRATOR_URL: https://luvira-devflow-orchestrator-660319628285.us-central1.run.app
-
 on:
   workflow_dispatch:
     inputs:
@@ -29,18 +23,38 @@ jobs:
     environment: human-approval
     runs-on: ubuntu-latest
     steps:
+      # Discover the current canonical Cloud Run URL.  Do not hard-code a
+      # run.app hostname: its hash is assigned by Cloud Run and can differ
+      # across service recreation or project migration.
       - uses: google-github-actions/auth@v2
-        id: auth
+        id: discovery_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval
+          service_account: devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+      - name: Discover the canonical orchestrator endpoint
+        id: orchestrator
+        run: |
+          set -euo pipefail
+          url="$(gcloud run services describe luvira-devflow-orchestrator \
+            --region us-central1 \
+            --project luvira-ai-control-plane \
+            --format='value(status.url)')"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@v2
+        id: request_auth
         with:
           workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval
           service_account: devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com
           audience: https://github.com/nario0715masa0619-create
           token_format: id_token
-          id_token_audience: ${{ env.ORCHESTRATOR_URL }}
+          id_token_audience: ${{ steps.orchestrator.outputs.url }}
           id_token_include_email: true
       - name: Record the immutable human authorization
         env:
-          ID_TOKEN: ${{ steps.auth.outputs.id_token }}
+          ID_TOKEN: ${{ steps.request_auth.outputs.id_token }}
+          ORCHESTRATOR_URL: ${{ steps.orchestrator.outputs.url }}
           TASK_ID: ${{ inputs.task_id }}
           APPROVAL_BINDING: ${{ inputs.approval_binding }}
           ACTOR: ${{ github.actor }}
