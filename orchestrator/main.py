@@ -209,7 +209,7 @@ def sweep_v3_broker():
     for task_id, outcome, execution_id in outcomes:
         # Outcomes are fixed control-plane codes and opaque ids only.  Never
         # log a TaskSpec, prompt, provider response, artifact, or credential.
-        logging.info(
+        logging.warning(
             "V3_BROKER_OUTCOME task=%s outcome=%s execution=%s",
             task_id,
             outcome,
