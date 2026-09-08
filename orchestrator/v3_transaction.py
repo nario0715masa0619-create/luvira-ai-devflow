@@ -36,7 +36,10 @@ class V3Transaction:
 
         task_ref = self.tasks.document(task.task_id)
         def write(transaction: Any) -> None:
-            task_snapshot = transaction.get(task_ref)
+            # Firestore Transaction.get() is a streaming API.  A single
+            # document read must go through the document reference so the
+            # transaction receives one DocumentSnapshot, not a generator.
+            task_snapshot = task_ref.get(transaction=transaction)
             if not task_snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(task_snapshot.to_dict())
@@ -67,7 +70,7 @@ class V3Transaction:
         task_ref = self.tasks.document(task.task_id)
 
         def write(transaction: Any) -> None:
-            snapshot = transaction.get(task_ref)
+            snapshot = task_ref.get(transaction=transaction)
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
@@ -93,7 +96,7 @@ class V3Transaction:
         task_ref = self.tasks.document(task.task_id)
 
         def write(transaction: Any) -> None:
-            snapshot = transaction.get(task_ref)
+            snapshot = task_ref.get(transaction=transaction)
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
@@ -118,7 +121,7 @@ class V3Transaction:
         task_ref = self.tasks.document(task.task_id)
 
         def write(transaction: Any) -> None:
-            snapshot = transaction.get(task_ref)
+            snapshot = task_ref.get(transaction=transaction)
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
