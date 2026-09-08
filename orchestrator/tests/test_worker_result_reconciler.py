@@ -31,8 +31,8 @@ class WorkerResultReconcilerTest(unittest.TestCase):
     def reconciler(self, task, state, stdout=""):
         writes = []
         tasks = type("Tasks", (), {"running": lambda _: [task]})()
-        transaction = type("Tx", (), {"record_result": lambda _, current, record, status: writes.append((current.status, status))})()
-        worker = type("Worker", (), {"completion_state": lambda _, __: state})()
+        transaction = type("Tx", (), {"record_external_operation": lambda *_: None, "record_result": lambda _, current, record, status: writes.append((current.status, status))})()
+        worker = type("Worker", (), {"find_execution_for_task": lambda *_: None, "completion_state": lambda _, __: state})()
         logs = type("Logs", (), {"read_stdout": lambda _, __: stdout})()
         return WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore())), writes
 

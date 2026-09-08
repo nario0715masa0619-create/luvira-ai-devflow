@@ -17,7 +17,7 @@ class Session:
 
 class CloudRunBootstrapClientTest(unittest.TestCase):
     def test_starts_with_one_ephemeral_envelope_override_and_waits_for_success(self):
-        base = "https://run.googleapis.com/v2/projects/p/locations/us-central1/jobs/j"
+        base = "projects/p/locations/us-central1/jobs/j"
         session = Session([Response({"name": "operations/1"}), Response({"done": True, "response": {"name": base + "/executions/e-123"}}), Response({"conditions": [{"type": "Completed", "state": "CONDITION_SUCCEEDED"}]})])
         client = CloudRunBootstrapClient("p", "us-central1", "j", session=session, sleep=lambda _: None)
         execution = client.start(valid_envelope())

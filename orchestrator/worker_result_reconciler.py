@@ -15,10 +15,12 @@ class RunningTaskReader(Protocol):
 
 
 class ResultTransaction(Protocol):
+    def record_external_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
     def record_result(self, task: V3Task, record: ExecutionRecord, expected_status: V3Status) -> None: ...
 
 
 class WorkerStateReader(Protocol):
+    def find_execution_for_task(self, task_id: str, spec_hash: str) -> str | None: ...
     def completion_state(self, execution_id: str) -> str: ...
 
 
@@ -43,8 +45,21 @@ class WorkerResultReconciler:
         for task in self._tasks.running():
             record = task.execution
             if record is None or not record.external_operation_id:
-                outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", record.execution_id if record else None))
-                continue
+                if record is not None:
+                    try:
+                        recovered = self._worker.find_execution_for_task(task.task_id, task.spec.hash)
+                        if recovered:
+                            record.external_operation_id = recovered
+                            self._transaction.record_external_operation(task, record)
+                        else:
+                            outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", record.execution_id))
+                            continue
+                    except Exception:
+                        outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", record.execution_id))
+                        continue
+                else:
+                    outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", None))
+                    continue
             try:
                 state = self._worker.completion_state(record.external_operation_id)
             except Exception:
