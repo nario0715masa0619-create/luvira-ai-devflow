@@ -28,6 +28,10 @@ def main() -> None:
     require(workflow, f"environment: {contract['environment']}", "protected environment")
     require(workflow, f"workload_identity_provider: {provider}", "dedicated OIDC provider")
     require(workflow, f"service_account: {contract['service_account']}", "dedicated service account")
+    require(workflow, "gcloud run services describe", "canonical Cloud Run endpoint discovery")
+    require(workflow, "${{ steps.orchestrator.outputs.url }}", "discovered ID-token audience")
+    if "ORCHESTRATOR_URL: https://" in workflow:
+        raise SystemExit("human-approval workflow must not hard-code a Cloud Run endpoint")
     if "github-deployer" in workflow or "devflow-deployer@" in workflow:
         raise SystemExit("human-approval workflow must not use the deployment identity")
 
