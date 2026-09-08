@@ -55,6 +55,17 @@ class ImplementationExecutionService:
             if record is None:
                 outcomes.append((task.task_id, "IMPLEMENTATION_STATE_INVALID", None))
                 continue
+            if task.spec.model_policy == "none":
+                try:
+                    # A validation-only TaskSpec has a hard no-provider
+                    # contract.  End it here instead of sending the source
+                    # snapshot to an implementation model.
+                    ExecutionPlatform.complete_validation_existing(task, record.execution_id)
+                    self._transaction.record_result(task, record, V3Status.VALIDATION_SUCCEEDED)
+                    outcomes.append((task.task_id, "VALIDATION_SUCCEEDED", record.execution_id))
+                except Exception:
+                    outcomes.append((task.task_id, "VALIDATION_RESULT_UNAVAILABLE", record.execution_id))
+                continue
             try:
                 ExecutionPlatform.begin_implementation_existing(task, record.execution_id)
                 self._transaction.claim_implementation(task, record)

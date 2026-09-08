@@ -125,12 +125,15 @@ class V3Transaction:
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
-            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.IMPLEMENTATION_GENERATING}
+            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED}
                     or stored.execution is None
                     or stored.execution.execution_id != record.execution_id
                     or stored.execution.external_operation_id != record.external_operation_id
                     or stored.revision != task.revision):
                 raise V3TransactionError("v3_execution_result_not_recordable")
+            if (stored.status is V3Status.WORKER_HEALTH_VERIFIED
+                    and expected_status is not V3Status.VALIDATION_SUCCEEDED):
+                raise V3TransactionError("v3_validation_result_invalid")
             payload = task_payload(task)
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
