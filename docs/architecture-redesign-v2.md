@@ -45,6 +45,8 @@ DRAFT → VALIDATED → AWAITING_HUMAN_APPROVAL → AUTHORIZED
 ### Model routing
 
 - 初手は評価済みの低コストOpenCode Goモデル。
+- OpenCode Goの利用枠に到達した場合のZen残高へのフォールバックは、同一のOpenCode Go APIキーとエンドポイントでOpenCode側が行う。DevFlowは別キー・別プロバイダーへの二重送信をしない。
+- Zen残高または月間上限に到達したことが明示された場合は `BUDGET_EXHAUSTED_FINAL` として停止し、Schedulerの無限再試行を禁止する。
 - 高単価OpenCode Goモデルへの自動昇格は禁止。
 - provider障害、上限、タイムアウトだけを退避対象にし、最大2回まで。
 - テスト失敗、秘密情報検知、ポリシー違反では退避せず停止。
