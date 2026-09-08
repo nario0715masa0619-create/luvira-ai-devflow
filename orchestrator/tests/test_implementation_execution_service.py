@@ -17,6 +17,18 @@ def ready_task():
     return V3Task("task", spec, V3Status.WORKER_HEALTH_VERIFIED, execution=execution)
 
 
+def validation_task():
+    task = ready_task()
+    task.spec = TaskSpec.from_dict({
+        "repository": "a/b", "base_commit": "a" * 40, "requested_action": "validation",
+        "acceptance_criteria": ["health proof"], "budget": {"max_cost_usd": 0.1},
+        "expiry": "2026-12-01T00:00:00Z", "execution_scope": {"allowed_paths": ["README.md"]},
+        "model_policy": "none",
+    })
+    task.execution.spec_hash = task.spec.hash
+    return task
+
+
 class ImplementationExecutionServiceTest(unittest.TestCase):
     def test_claims_before_one_verified_provider_result(self):
         task, calls = ready_task(), []
@@ -34,3 +46,21 @@ class ImplementationExecutionServiceTest(unittest.TestCase):
         self.assertEqual(service.sweep(), [("task", "IMPLEMENTATION_ARTIFACT_VERIFIED", "execution-123")])
         self.assertEqual(task.status, V3Status.ARTIFACT_VERIFIED)
         self.assertEqual(calls, [V3Status.IMPLEMENTATION_GENERATING, V3Status.ARTIFACT_VERIFIED])
+
+    def test_validation_policy_never_calls_provider_or_reads_source(self):
+        task, calls = validation_task(), []
+        tasks = type("Tasks", (), {"worker_health_verified": lambda _: [task]})()
+        transaction = type("Tx", (), {
+            "claim_implementation": lambda *_: self.fail("must not claim provider work"),
+            "record_result": lambda _, current, __, status: calls.append(status),
+        })()
+        client = type("Client", (), {"generate_artifact": lambda *_args, **_kwargs: self.fail("must not call provider")})()
+        service = ImplementationExecutionService(
+            tasks, transaction,
+            lambda _: self.fail("must not read source"), client, "kimi-k2.6",
+            ImplementationArtifactHandoff(InMemoryImplementationArtifactStore()),
+        )
+
+        self.assertEqual(service.sweep(), [("task", "VALIDATION_SUCCEEDED", "execution-123")])
+        self.assertEqual(task.status, V3Status.VALIDATION_SUCCEEDED)
+        self.assertEqual(calls, [V3Status.VALIDATION_SUCCEEDED])

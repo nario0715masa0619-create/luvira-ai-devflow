@@ -38,6 +38,7 @@ class V3Status(str, Enum):
     EXECUTION_FAILED_RETRYABLE = "EXECUTION_FAILED_RETRYABLE"
     EXECUTION_FAILED_FINAL = "EXECUTION_FAILED_FINAL"
     WORKER_HEALTH_VERIFIED = "WORKER_HEALTH_VERIFIED"
+    VALIDATION_SUCCEEDED = "VALIDATION_SUCCEEDED"
     IMPLEMENTATION_GENERATING = "IMPLEMENTATION_GENERATING"
     ARTIFACT_VERIFIED = "ARTIFACT_VERIFIED"
     REVIEWING = "REVIEWING"
@@ -283,6 +284,23 @@ class ExecutionPlatform:
         task.execution.status = V3Status.IMPLEMENTATION_GENERATING
         task.status = V3Status.IMPLEMENTATION_GENERATING
         task.audit.append("IMPLEMENTATION_GENERATING")
+        return task
+
+    @staticmethod
+    def complete_validation_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Finish a no-model validation after its Worker health proof.
+
+        Validation tasks are explicitly forbidden from calling an AI provider
+        or creating a diff.  Their Worker proof is therefore the terminal
+        result, not a precursor to implementation generation.
+        """
+        if task.status is not V3Status.WORKER_HEALTH_VERIFIED:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        task.execution.status = V3Status.VALIDATION_SUCCEEDED
+        task.status = V3Status.VALIDATION_SUCCEEDED
+        task.audit.append("VALIDATION_SUCCEEDED")
         return task
 
     @staticmethod
