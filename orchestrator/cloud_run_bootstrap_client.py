@@ -29,6 +29,10 @@ class CloudRunBootstrapClient:
     def _job_url(self) -> str:
         return f"https://run.googleapis.com/v2/projects/{self.project}/locations/{self.region}/jobs/{self.job}"
 
+    @property
+    def _job_resource(self) -> str:
+        return f"projects/{self.project}/locations/{self.region}/jobs/{self.job}"
+
     def start(self, envelope: dict) -> str:
         encoded = base64.b64encode(json.dumps(envelope, sort_keys=True).encode("utf-8")).decode("ascii")
         response = self._session.post(
@@ -44,11 +48,36 @@ class CloudRunBootstrapClient:
             result = self._json(self._session.get(f"https://run.googleapis.com/v2/{operation_name}", timeout=30), "cloud_run_operation_failed")
             if result.get("done"):
                 execution = (result.get("response") or {}).get("name")
-                if isinstance(execution, str) and execution.startswith(self._job_url + "/executions/"):
+                # Cloud Run returns a resource name, not its REST URL.
+                if isinstance(execution, str) and execution.startswith(self._job_resource + "/executions/"):
                     return execution.rsplit("/", 1)[1]
                 raise CloudRunBootstrapClientError("cloud_run_execution_invalid")
             self._sleep(2)
         raise CloudRunBootstrapClientError("cloud_run_start_timeout")
+
+    def find_execution_for_task(self, task_id: str, spec_hash: str) -> str | None:
+        """Recover one accepted-but-unbound start without launching anything."""
+        payload = self._json(self._session.get(self._job_url + "/executions?pageSize=100", timeout=30), "cloud_run_execution_list_failed")
+        matches = []
+        for execution in payload.get("executions", []):
+            if not isinstance(execution, dict):
+                continue
+            containers = ((execution.get("template") or {}).get("template") or {}).get("containers") or []
+            for container in containers:
+                for env in (container.get("env", []) if isinstance(container, dict) else []):
+                    if not isinstance(env, dict) or env.get("name") != "WORKER_ENVELOPE_B64":
+                        continue
+                    try:
+                        envelope = json.loads(base64.b64decode(env.get("value", "")).decode())
+                    except Exception:
+                        continue
+                    if envelope.get("task_id") == task_id and envelope.get("spec_hash") == spec_hash:
+                        name = execution.get("name", "")
+                        if isinstance(name, str) and name.startswith(self._job_resource + "/executions/"):
+                            matches.append(name.rsplit("/", 1)[1])
+        if len(matches) > 1:
+            raise CloudRunBootstrapClientError("cloud_run_execution_ambiguous")
+        return matches[0] if matches else None
 
     def wait_for_success(self, execution_id: str) -> None:
         if not isinstance(execution_id, str) or not execution_id:
