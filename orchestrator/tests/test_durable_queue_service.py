@@ -61,7 +61,7 @@ class DurableQueueServiceTest(unittest.TestCase):
         task = authorized_task()
         transaction = Transaction()
 
-        with self.assertRaisesRegex(DurableQueueRejected, "execution_preflight_failed"):
+        with self.assertRaisesRegex(DurableQueueRejected, "execution_preflight_failed:BLOCKED"):
             DurableQueueService(Reader(task), preflight(False), transaction).request(task.task_id)
 
         self.assertEqual(task.status, V3Status.AUTHORIZED)

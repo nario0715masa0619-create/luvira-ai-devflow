@@ -40,7 +40,13 @@ class DurableQueueService:
         task = self._tasks.get(task_id)
         report = self._preflight.run(task.spec)
         if not report.passed:
-            raise DurableQueueRejected("execution_preflight_failed")
+            # The report is intentionally limited to stable public codes.  Keep
+            # those codes on the rejection so an autonomous retry can be
+            # diagnosed without recording provider responses or credentials.
+            failed_codes = ",".join(
+                check.code for check in report.checks if not check.passed
+            )
+            raise DurableQueueRejected(f"execution_preflight_failed:{failed_codes}")
 
         original_status, original_execution, original_audit = (
             task.status,
