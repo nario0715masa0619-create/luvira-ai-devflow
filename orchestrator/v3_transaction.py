@@ -53,6 +53,36 @@ class V3Transaction:
         self._run_transaction(write)
         task.revision += 1
 
+    def begin_queued(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Atomically claim a queued execution before any external request.
+
+        The caller must persist ``EXECUTION_RUNNING`` first.  A second broker
+        sweep then observes the claim and is rejected before it can launch a
+        duplicate Worker or spend a second provider request.
+        """
+        if task.status is not V3Status.EXECUTION_RUNNING or record.status is not V3Status.EXECUTION_RUNNING:
+            raise V3TransactionError("execution_not_running")
+        if task.execution is not record:
+            raise V3TransactionError("task_execution_not_embedded")
+        task_ref = self.tasks.document(task.task_id)
+
+        def write(transaction: Any) -> None:
+            snapshot = transaction.get(task_ref)
+            if not snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(snapshot.to_dict())
+            if (stored.status is not V3Status.EXECUTION_QUEUED
+                    or stored.execution is None
+                    or stored.execution.execution_id != record.execution_id
+                    or stored.revision != task.revision):
+                raise V3TransactionError("v3_execution_not_claimable")
+            payload = task_payload(task)
+            payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
+
+        self._run_transaction(write)
+        task.revision += 1
+
     def _run_transaction(self, write: Callable[[Any], None]) -> None:
         transaction = self.client.transaction()
         # The client hook keeps this adapter unit-testable. Production Firestore
