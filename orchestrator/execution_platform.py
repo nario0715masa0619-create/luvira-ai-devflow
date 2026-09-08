@@ -305,6 +305,17 @@ class ExecutionPlatform:
             raise TransitionRejected("execution_identity_mismatch")
         return ExecutionPlatform.fail_existing(task, execution_id, code)
 
+    @staticmethod
+    def publish_existing(task: V3Task, execution_id: str) -> V3Task:
+        if task.status is not V3Status.ARTIFACT_VERIFIED:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        task.execution.status = V3Status.PUBLISHED
+        task.status = V3Status.PUBLISHED
+        task.audit.append("PUBLISHED")
+        return task
+
     def _task(self, task_id: str, *statuses: V3Status) -> V3Task:
         try:
             task = self._tasks[task_id]

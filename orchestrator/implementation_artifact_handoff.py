@@ -29,6 +29,7 @@ class VerifiedImplementationArtifactRecord:
 
 class ImplementationArtifactStore(Protocol):
     def put_once(self, record: VerifiedImplementationArtifactRecord) -> None: ...
+    def get(self, execution_id: str) -> VerifiedImplementationArtifactRecord: ...
 
 
 class InMemoryImplementationArtifactStore:
@@ -41,6 +42,9 @@ class InMemoryImplementationArtifactStore:
         if record.execution_id in self.records:
             raise ImplementationArtifactHandoffError("implementation_artifact_replayed")
         self.records[record.execution_id] = record
+
+    def get(self, execution_id: str) -> VerifiedImplementationArtifactRecord:
+        return self.records[execution_id]
 
 
 class FirestoreImplementationArtifactStore:
@@ -75,6 +79,24 @@ class FirestoreImplementationArtifactStore:
             self._collection.document(record.execution_id).create(payload)
         except AlreadyExists as exc:
             raise ImplementationArtifactHandoffError("implementation_artifact_replayed") from exc
+
+    def get(self, execution_id: str) -> VerifiedImplementationArtifactRecord:
+        snapshot = self._collection.document(execution_id).get()
+        if not snapshot.exists:
+            raise ImplementationArtifactHandoffError("implementation_artifact_not_found")
+        try:
+            value = snapshot.to_dict()
+            artifact = value["artifact"]
+            return VerifiedImplementationArtifactRecord(
+                execution_id=value["execution_id"], artifact_sha256=value["artifact_sha256"],
+                artifact=VerifiedImplementationArtifact(
+                    task_id=artifact["task_id"], spec_hash=artifact["spec_hash"], base_commit=artifact["base_commit"],
+                    diff=base64.b64decode(artifact["diff_b64"], validate=True),
+                    changed_paths=tuple(artifact["changed_paths"]), tests=tuple(artifact["tests"]),
+                ),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ImplementationArtifactHandoffError("implementation_artifact_invalid") from exc
 
 
 class ImplementationArtifactHandoff:

@@ -3,8 +3,8 @@ from execution_platform import ExecutionPlatformError, V3Status
 
 
 class AutonomousBroker:
-    def __init__(self, tasks, queue, dispatcher=None, reconciler=None, implementation=None):
-        self.tasks, self.queue, self.dispatcher, self.reconciler, self.implementation = tasks, queue, dispatcher, reconciler, implementation
+    def __init__(self, tasks, queue, dispatcher=None, reconciler=None, implementation=None, publication=None):
+        self.tasks, self.queue, self.dispatcher, self.reconciler, self.implementation, self.publication = tasks, queue, dispatcher, reconciler, implementation, publication
 
     def sweep(self):
         """Attempt each eligible persisted task; retain approval on failure."""
@@ -13,6 +13,8 @@ class AutonomousBroker:
             outcomes.extend(self.reconciler.sweep())
         if self.implementation is not None:
             outcomes.extend(self.implementation.sweep())
+        if self.publication is not None:
+            outcomes.extend(self.publication.sweep())
         for task in self.tasks.eligible():
             if task.status not in {V3Status.AUTHORIZED, V3Status.EXECUTION_FAILED_RETRYABLE}:
                 continue

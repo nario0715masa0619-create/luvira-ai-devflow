@@ -102,3 +102,7 @@ class FirestoreV3TaskStore:
         """Tasks eligible for exactly one Broker-held implementation request."""
         for snapshot in self._collection.where("status", "==", V3Status.WORKER_HEALTH_VERIFIED.value).stream():
             yield task_from_payload(snapshot.to_dict())
+
+    def artifact_verified(self):
+        for snapshot in self._collection.where("status", "==", V3Status.ARTIFACT_VERIFIED.value).stream():
+            yield task_from_payload(snapshot.to_dict())
