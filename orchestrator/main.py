@@ -206,6 +206,15 @@ def sweep_v3_broker():
     except Exception:
         logging.exception("V3_BROKER_SWEEP_FAILED")
         return jsonify(status="RETRY_PENDING"), 503
+    for task_id, outcome, execution_id in outcomes:
+        # Outcomes are fixed control-plane codes and opaque ids only.  Never
+        # log a TaskSpec, prompt, provider response, artifact, or credential.
+        logging.info(
+            "V3_BROKER_OUTCOME task=%s outcome=%s execution=%s",
+            task_id,
+            outcome,
+            execution_id,
+        )
     return jsonify(
         status="OK",
         outcomes=[{"task_id": task_id, "status": status, "execution_id": execution_id}
