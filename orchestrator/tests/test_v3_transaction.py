@@ -63,3 +63,18 @@ class V3TransactionTest(unittest.TestCase):
 
         self.transaction.update.assert_called_once()
         self.assertEqual(self.queued.revision, 2)
+
+    def test_records_external_execution_only_after_durable_claim(self):
+        running = V3Task("task", self.spec, V3Status.EXECUTION_RUNNING)
+        record = ExecutionRecord("execution", "task", self.spec.hash, 1, V3Status.EXECUTION_RUNNING, external_operation_id="run-1")
+        running.execution = record
+        stored = V3Task("task", self.spec, V3Status.EXECUTION_RUNNING)
+        stored.execution = ExecutionRecord("execution", "task", self.spec.hash, 1, V3Status.EXECUTION_RUNNING)
+        task_snapshot = Mock(exists=True)
+        task_snapshot.to_dict.return_value = task_payload(stored)
+        self.transaction.get.return_value = task_snapshot
+
+        V3Transaction(self.client).record_external_operation(running, record)
+
+        self.transaction.update.assert_called_once()
+        self.assertEqual(running.revision, 2)

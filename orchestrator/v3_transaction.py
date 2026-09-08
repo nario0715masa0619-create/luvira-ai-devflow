@@ -83,6 +83,33 @@ class V3Transaction:
         self._run_transaction(write)
         task.revision += 1
 
+    def record_external_operation(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Bind the Cloud Run execution id to the already claimed task."""
+        if (task.status is not V3Status.EXECUTION_RUNNING
+                or task.execution is not record
+                or not isinstance(record.external_operation_id, str)
+                or not record.external_operation_id):
+            raise V3TransactionError("external_operation_invalid")
+        task_ref = self.tasks.document(task.task_id)
+
+        def write(transaction: Any) -> None:
+            snapshot = transaction.get(task_ref)
+            if not snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(snapshot.to_dict())
+            if (stored.status is not V3Status.EXECUTION_RUNNING
+                    or stored.execution is None
+                    or stored.execution.execution_id != record.execution_id
+                    or stored.execution.external_operation_id is not None
+                    or stored.revision != task.revision):
+                raise V3TransactionError("v3_external_operation_not_recordable")
+            payload = task_payload(task)
+            payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
+
+        self._run_transaction(write)
+        task.revision += 1
+
     def _run_transaction(self, write: Callable[[Any], None]) -> None:
         transaction = self.client.transaction()
         # The client hook keeps this adapter unit-testable. Production Firestore
