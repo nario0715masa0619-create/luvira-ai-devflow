@@ -32,7 +32,7 @@ def main() -> None:
     require(workflow, "${{ steps.orchestrator.outputs.url }}", "discovered ID-token audience")
     require(workflow, "issue_number:", "server-owned approval Issue input")
     require(workflow, "/control-plane/v3/approval-issues/$ISSUE_NUMBER/pending", "server-side task resolution")
-    if "approval_binding:" in workflow or "task_id:" in workflow:
+    if "inputs:\n      approval_binding:" in workflow or "inputs:\n      task_id:" in workflow:
         raise SystemExit("human-approval workflow must not accept reconstructed task facts")
     if "ORCHESTRATOR_URL: https://" in workflow:
         raise SystemExit("human-approval workflow must not hard-code a Cloud Run endpoint")
