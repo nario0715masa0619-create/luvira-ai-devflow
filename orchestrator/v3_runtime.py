@@ -22,6 +22,8 @@ from worker_result_reconciler import WorkerResultReconciler
 from github_readonly_source import GitHubReadOnlySource
 from implementation_execution_service import ImplementationExecutionService
 from opencode_implementation_client import OpenCodeImplementationClient
+from github_verified_publisher import GitHubVerifiedPublisher
+from verified_publication_service import VerifiedPublicationService
 
 
 @dataclass(frozen=True)
@@ -31,6 +33,7 @@ class V3QueueRuntime:
     dispatcher: WorkerDispatchService
     reconciler: WorkerResultReconciler
     implementation: ImplementationExecutionService
+    publication: VerifiedPublicationService
 
 
 def create_v3_queue_service(
@@ -119,6 +122,9 @@ def create_v3_queue_service(
         CloudLoggingBootstrapReader(project, region, artifact_bucket, artifact_view),
         ArtifactHandoff(FirestoreVerifiedArtifactStore(firestore_client, artifact_collection)),
     )
+    implementation_store = FirestoreImplementationArtifactStore(
+        firestore_client, implementation_artifact_collection,
+    )
     implementation = ImplementationExecutionService(
         tasks, transaction,
         lambda task: GitHubReadOnlySource(
@@ -126,8 +132,10 @@ def create_v3_queue_service(
         ).snapshot(task.spec.base_commit, task.spec.allowed_paths),
         OpenCodeImplementationClient(implementation_api_key),
         implementation_model,
-        ImplementationArtifactHandoff(FirestoreImplementationArtifactStore(
-            firestore_client, implementation_artifact_collection,
-        )),
+        ImplementationArtifactHandoff(implementation_store),
     )
-    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation)
+    publication = VerifiedPublicationService(
+        tasks, transaction, implementation_store,
+        lambda task: GitHubVerifiedPublisher(task.spec.repository, source_token_for_repository(task.spec.repository)),
+    )
+    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication)
