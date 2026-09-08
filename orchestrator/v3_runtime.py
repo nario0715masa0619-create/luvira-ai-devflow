@@ -10,11 +10,14 @@ from google.cloud import run_v2
 
 from cloud_run_preflight import cloud_run_checkers
 from cloud_run_bootstrap_client import CloudRunBootstrapClient
+from cloud_run_bootstrap_client import CloudLoggingBootstrapReader
+from artifact_handoff import ArtifactHandoff, FirestoreVerifiedArtifactStore
 from durable_queue_service import DurableQueueService
 from execution_preflight import ExecutionPreflight, PreflightCheck
 from v3_task_store import FirestoreV3TaskStore
 from v3_transaction import V3Transaction
 from worker_dispatch_service import WorkerDispatchService
+from worker_result_reconciler import WorkerResultReconciler
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,7 @@ class V3QueueRuntime:
     tasks: FirestoreV3TaskStore
     queue: DurableQueueService
     dispatcher: WorkerDispatchService
+    reconciler: WorkerResultReconciler
 
 
 def create_v3_queue_service(
@@ -33,6 +37,9 @@ def create_v3_queue_service(
     task_collection: str,
     artifact_boundary_available: Callable[[], bool],
     provider_available: Callable[[], bool],
+    artifact_bucket: str = "luvira-devflow-bootstrap-results",
+    artifact_view: str = "bootstrap-results",
+    artifact_collection: str = "devflow_verified_artifacts",
 ) -> V3QueueRuntime:
     """Compose only read checks plus the durable queue; never a launcher."""
     firestore_client = firestore.Client()
@@ -92,7 +99,11 @@ def create_v3_queue_service(
         preflight,
         transaction,
     )
-    dispatcher = WorkerDispatchService(
-        tasks, transaction, CloudRunBootstrapClient(project, region, worker_job),
+    worker = CloudRunBootstrapClient(project, region, worker_job)
+    dispatcher = WorkerDispatchService(tasks, transaction, worker)
+    reconciler = WorkerResultReconciler(
+        tasks, transaction, worker,
+        CloudLoggingBootstrapReader(project, region, artifact_bucket, artifact_view),
+        ArtifactHandoff(FirestoreVerifiedArtifactStore(firestore_client, artifact_collection)),
     )
-    return V3QueueRuntime(tasks, queue, dispatcher)
+    return V3QueueRuntime(tasks, queue, dispatcher, reconciler)

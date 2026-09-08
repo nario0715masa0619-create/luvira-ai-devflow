@@ -31,3 +31,8 @@ class CloudRunBootstrapClientTest(unittest.TestCase):
         reader = CloudLoggingBootstrapReader("p", "us-central1", "b", "v", session=session)
         self.assertEqual(reader.read_stdout("e-123"), "LUVIRA_BOOTSTRAP_ARTIFACT_B64=abc")
         self.assertIn("projects/p/locations/us-central1/buckets/b/views/v", session.calls[0][2]["json"]["resourceNames"])
+
+    def test_reads_one_completion_state_without_waiting(self):
+        session = Session([Response({"conditions": [{"type": "Completed", "state": "CONDITION_SUCCEEDED"}]})])
+        client = CloudRunBootstrapClient("p", "us-central1", "j", session=session)
+        self.assertEqual(client.completion_state("e-123"), "SUCCEEDED")

@@ -110,6 +110,31 @@ class V3Transaction:
         self._run_transaction(write)
         task.revision += 1
 
+    def record_result(self, task: V3Task, record: ExecutionRecord, expected_status: V3Status) -> None:
+        """Persist a verified or classified terminal result for one execution."""
+        if (task.execution is not record or task.status is not expected_status
+                or record.status is not expected_status):
+            raise V3TransactionError("execution_result_invalid")
+        task_ref = self.tasks.document(task.task_id)
+
+        def write(transaction: Any) -> None:
+            snapshot = transaction.get(task_ref)
+            if not snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(snapshot.to_dict())
+            if (stored.status is not V3Status.EXECUTION_RUNNING
+                    or stored.execution is None
+                    or stored.execution.execution_id != record.execution_id
+                    or stored.execution.external_operation_id != record.external_operation_id
+                    or stored.revision != task.revision):
+                raise V3TransactionError("v3_execution_result_not_recordable")
+            payload = task_payload(task)
+            payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
+
+        self._run_transaction(write)
+        task.revision += 1
+
     def _run_transaction(self, write: Callable[[Any], None]) -> None:
         transaction = self.client.transaction()
         # The client hook keeps this adapter unit-testable. Production Firestore

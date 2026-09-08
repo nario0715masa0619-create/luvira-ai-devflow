@@ -92,3 +92,8 @@ class FirestoreV3TaskStore:
             V3Status.AUTHORIZED.value, V3Status.EXECUTION_FAILED_RETRYABLE.value,
         ]).stream():
             yield task_from_payload(snapshot.to_dict())
+
+    def running(self):
+        """Read claimed executions for result reconciliation only."""
+        for snapshot in self._collection.where("status", "==", V3Status.EXECUTION_RUNNING.value).stream():
+            yield task_from_payload(snapshot.to_dict())

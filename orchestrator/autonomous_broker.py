@@ -3,12 +3,14 @@ from execution_platform import V3Status
 
 
 class AutonomousBroker:
-    def __init__(self, tasks, queue, dispatcher=None):
-        self.tasks, self.queue, self.dispatcher = tasks, queue, dispatcher
+    def __init__(self, tasks, queue, dispatcher=None, reconciler=None):
+        self.tasks, self.queue, self.dispatcher, self.reconciler = tasks, queue, dispatcher, reconciler
 
     def sweep(self):
         """Attempt each eligible persisted task; retain approval on failure."""
         outcomes = []
+        if self.reconciler is not None:
+            outcomes.extend(self.reconciler.sweep())
         for task in self.tasks.eligible():
             if task.status not in {V3Status.AUTHORIZED, V3Status.EXECUTION_FAILED_RETRYABLE}:
                 continue

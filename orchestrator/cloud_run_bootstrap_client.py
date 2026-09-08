@@ -63,6 +63,23 @@ class CloudRunBootstrapClient:
             self._sleep(2)
         raise CloudRunBootstrapClientError("cloud_run_execution_timeout")
 
+    def completion_state(self, execution_id: str) -> str:
+        """Read one execution state; unlike wait_for_success this never blocks."""
+        if not isinstance(execution_id, str) or not execution_id:
+            raise CloudRunBootstrapClientError("cloud_run_execution_invalid")
+        result = self._json(
+            self._session.get(f"{self._job_url}/executions/{execution_id}", timeout=30),
+            "cloud_run_execution_read_failed",
+        )
+        completed = next((c for c in result.get("conditions", []) if c.get("type") == "Completed"), None)
+        if completed is None:
+            return "PENDING"
+        if completed.get("state") == "CONDITION_SUCCEEDED":
+            return "SUCCEEDED"
+        if completed.get("state") in {"CONDITION_FAILED", "CONDITION_CANCELLED"}:
+            return "FAILED"
+        raise CloudRunBootstrapClientError("cloud_run_execution_state_invalid")
+
     @staticmethod
     def _json(response: Any, reason: str) -> dict:
         if getattr(response, "status_code", 500) >= 300:

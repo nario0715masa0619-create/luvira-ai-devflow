@@ -242,12 +242,33 @@ class ExecutionPlatform:
 
     def _fail_with_code(self, task_id: str, execution_id: str, code: str) -> V3Task:
         task = self._task(task_id, V3Status.EXECUTION_RUNNING)
+        return self.fail_existing(task, execution_id, code)
+
+    @staticmethod
+    def fail_existing(task: V3Task, execution_id: str, code: str) -> V3Task:
+        """Record a classified result on an already loaded running task."""
+        if task.status is not V3Status.EXECUTION_RUNNING:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if task.execution is None or task.execution.execution_id != execution_id:
             raise TransitionRejected("execution_identity_mismatch")
+        if not isinstance(code, str) or not code:
+            raise TransitionRejected("execution_failure_code_invalid")
         task.execution.failure_code = code
         task.execution.status = V3Status.EXECUTION_FAILED_RETRYABLE if code.endswith("RETRYABLE") else V3Status.EXECUTION_FAILED_FINAL
         task.status = task.execution.status
         task.audit.append(task.status.value)
+        return task
+
+    @staticmethod
+    def verify_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Advance only a running execution whose result passed verification."""
+        if task.status is not V3Status.EXECUTION_RUNNING:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        task.execution.status = V3Status.ARTIFACT_VERIFIED
+        task.status = V3Status.ARTIFACT_VERIFIED
+        task.audit.append("ARTIFACT_VERIFIED")
         return task
 
     def _task(self, task_id: str, *statuses: V3Status) -> V3Task:
