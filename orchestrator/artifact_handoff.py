@@ -93,5 +93,10 @@ class ArtifactHandoff:
             artifact_sha256=hashlib.sha256(artifact_bytes).hexdigest(),
             artifact=artifact,
         )
-        self._store.put_once(record)
+        try:
+            self._store.put_once(record)
+        except ArtifactHandoffError:
+            raise
+        except Exception as exc:
+            raise ArtifactHandoffError("worker_artifact_store_unavailable") from exc
         return record

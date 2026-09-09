@@ -37,3 +37,9 @@ class ArtifactHandoffTest(unittest.TestCase):
         with self.assertRaisesRegex(ArtifactHandoffError, "worker_artifact_rejected"):
             self.handoff.receive_from_broker("luvira-devflow-isolated-worker-a1b2c", valid_envelope(), json.dumps(artifact).encode())
         self.assertEqual(self.store.records, {})
+
+    def test_labels_store_outage_without_retaining_artifact(self):
+        store = type("Store", (), {"put_once": lambda *_: (_ for _ in ()).throw(RuntimeError())})()
+        handoff = ArtifactHandoff(store)
+        with self.assertRaisesRegex(ArtifactHandoffError, "worker_artifact_store_unavailable"):
+            handoff.receive_from_broker("luvira-devflow-isolated-worker-a1b2c", valid_envelope(), json.dumps(bootstrap_artifact()).encode())

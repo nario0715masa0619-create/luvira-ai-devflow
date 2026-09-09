@@ -59,5 +59,6 @@ class WorkerResultReconcilerTest(unittest.TestCase):
     def test_malformed_artifact_fails_closed(self):
         task = running_task()
         reconciler, writes = self.reconciler(task, "SUCCEEDED", "not an artifact")
-        self.assertEqual(reconciler.sweep(), [("task", "ARTIFACT_REJECTED_FINAL", "execution")])
+        self.assertEqual(reconciler.sweep(), [("task", "worker_bootstrap_artifact_missing_or_ambiguous", "execution")])
+        self.assertEqual(task.execution.failure_code, "worker_bootstrap_artifact_missing_or_ambiguous")
         self.assertEqual(writes, [(V3Status.EXECUTION_FAILED_FINAL, V3Status.EXECUTION_FAILED_FINAL)])
