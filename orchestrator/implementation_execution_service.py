@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Callable, Protocol
 
 from execution_platform import ExecutionPlatform, V3Status
-from implementation_artifact_handoff import ImplementationArtifactHandoff
+from implementation_artifact_handoff import ImplementationArtifactHandoff, ImplementationArtifactHandoffError
 from opencode_implementation_client import OpenCodeImplementationError
 
 
@@ -84,6 +84,12 @@ class ImplementationExecutionService:
                 outcomes.append((task.task_id, "IMPLEMENTATION_ARTIFACT_VERIFIED", record.execution_id))
             except OpenCodeImplementationError as exc:
                 self._fail(task, record, exc.code, outcomes)
+            except ImplementationArtifactHandoffError as exc:
+                # The handoff includes only the verifier's stable error code.
+                # Preserve it in the durable failure record so recovery can be
+                # based on the failed contract rule, without retaining model
+                # output or source content.
+                self._fail(task, record, str(exc), outcomes)
             except Exception:
                 self._fail(task, record, "IMPLEMENTATION_ARTIFACT_REJECTED_FINAL", outcomes)
         return outcomes

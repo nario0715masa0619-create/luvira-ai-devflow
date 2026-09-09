@@ -1,7 +1,11 @@
 import unittest
 
 from execution_platform import ExecutionRecord, TaskSpec, V3Status, V3Task
-from implementation_artifact_handoff import ImplementationArtifactHandoff, InMemoryImplementationArtifactStore
+from implementation_artifact_handoff import (
+    ImplementationArtifactHandoff,
+    ImplementationArtifactHandoffError,
+    InMemoryImplementationArtifactStore,
+)
 from implementation_execution_service import ImplementationExecutionService
 from test_implementation_artifact_verifier import payload
 
@@ -64,3 +68,21 @@ class ImplementationExecutionServiceTest(unittest.TestCase):
         self.assertEqual(service.sweep(), [("task", "VALIDATION_SUCCEEDED", "execution-123")])
         self.assertEqual(task.status, V3Status.VALIDATION_SUCCEEDED)
         self.assertEqual(calls, [V3Status.VALIDATION_SUCCEEDED])
+
+    def test_records_the_sanitized_artifact_verifier_code(self):
+        task, calls = ready_task(), []
+        tasks = type("Tasks", (), {"worker_health_verified": lambda _: [task]})()
+        transaction = type("Tx", (), {
+            "claim_implementation": lambda *_: None,
+            "record_result": lambda _, current, __, status: calls.append(status),
+        })()
+        client = type("Client", (), {"generate_artifact": lambda *_args, **_kwargs: b"{}"})()
+        handoff = type("Handoff", (), {
+            "receive_from_broker": lambda *_: (_ for _ in ()).throw(
+                ImplementationArtifactHandoffError("artifact_schema_mismatch")
+            )
+        })()
+        service = ImplementationExecutionService(tasks, transaction, lambda _: b"source", client, "kimi-k2.6", handoff)
+
+        self.assertEqual(service.sweep(), [("task", "EXECUTION_FAILED_FINAL", "execution-123")])
+        self.assertEqual(task.execution.failure_code, "artifact_schema_mismatch")
