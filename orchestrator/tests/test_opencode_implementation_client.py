@@ -21,6 +21,7 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         client = OpenCodeImplementationClient(api_key, transport)
         result = client.generate_artifact(model="kimi-k2.6", envelope={"task_id":"t","spec_hash":"a" * 64,"base_commit":"b" * 40,"allowed_paths":["src/"],"acceptance_criteria":["test"]}, source_snapshot=b"x")
         self.assertEqual(json.loads(result)["schema"], "luvira.devflow.implementation-artifact.v1")
+        self.assertEqual(calls[0][1], 240)
         self.assertNotIn(api_key.encode(), calls[0][0].data)
         request_body = json.loads(calls[0][0].data)
         self.assertEqual(calls[0][0].get_header("X-opencode-session"), "luvira-0d9907cf80722b6e7d79ddfcc4ec1ba4")

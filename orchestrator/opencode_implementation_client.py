@@ -18,6 +18,10 @@ from opencode_provider_policy import classify_opencode_failure
 
 ENDPOINT = "https://opencode.ai/zen/go/v1/chat/completions"
 MAX_SOURCE_BYTES = 256 * 1024
+# Cloud Run allows five minutes for a broker sweep.  Leave time for durable
+# result verification after the provider responds; a 90-second client limit
+# turns healthy long-running coding requests into duplicate retry candidates.
+REQUEST_TIMEOUT_SECONDS = 240
 
 
 class OpenCodeImplementationError(ValueError):
@@ -88,7 +92,7 @@ class OpenCodeImplementationClient:
             "x-opencode-session": _session_id(envelope),
         })
         try:
-            with self._transport(request, timeout=90) as response:
+            with self._transport(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             raise OpenCodeImplementationError(classify_opencode_failure(exc.code, timeout=False)) from exc
