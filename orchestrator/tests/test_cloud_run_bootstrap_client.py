@@ -36,3 +36,10 @@ class CloudRunBootstrapClientTest(unittest.TestCase):
         session = Session([Response({"conditions": [{"type": "Completed", "state": "CONDITION_SUCCEEDED"}]})])
         client = CloudRunBootstrapClient("p", "us-central1", "j", session=session)
         self.assertEqual(client.completion_state("e-123"), "SUCCEEDED")
+
+    def test_returns_pending_operation_without_blocking_the_broker(self):
+        session = Session([Response({"name": "operations/1"})])
+        client = CloudRunBootstrapClient("p", "us-central1", "j", session=session)
+
+        self.assertEqual(client.start_operation(valid_envelope()), "operations/1")
+        self.assertEqual(len(session.calls), 1)
