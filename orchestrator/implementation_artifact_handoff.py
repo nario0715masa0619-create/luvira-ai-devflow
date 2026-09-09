@@ -124,5 +124,13 @@ class ImplementationArtifactHandoff:
             artifact_sha256=hashlib.sha256(payload).hexdigest(),
             artifact=artifact,
         )
-        self._store.put_once(record)
+        try:
+            self._store.put_once(record)
+        except ImplementationArtifactHandoffError:
+            raise
+        except Exception as exc:
+            # The model artifact may be valid even when durable storage is
+            # unavailable.  Keep that operational failure distinct from a
+            # verifier rejection and retain no provider content.
+            raise ImplementationArtifactHandoffError("implementation_artifact_store_unavailable") from exc
         return record

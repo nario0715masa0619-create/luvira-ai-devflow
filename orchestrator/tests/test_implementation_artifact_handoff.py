@@ -26,6 +26,13 @@ class ImplementationArtifactHandoffTest(unittest.TestCase):
         with self.assertRaisesRegex(ImplementationArtifactHandoffError, "artifact_schema_mismatch"):
             self.handoff.receive_from_broker("execution-456", ENVELOPE, b"{}")
 
+    def test_labels_durable_store_outage_without_retaining_artifact(self):
+        store = type("Store", (), {"put_once": lambda *_: (_ for _ in ()).throw(RuntimeError())})()
+        handoff = ImplementationArtifactHandoff(store)
+
+        with self.assertRaisesRegex(ImplementationArtifactHandoffError, "implementation_artifact_store_unavailable"):
+            handoff.receive_from_broker("execution-123", ENVELOPE, payload())
+
 
 class _Document:
     def __init__(self):
