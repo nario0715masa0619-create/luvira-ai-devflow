@@ -102,3 +102,20 @@ class ImplementationExecutionServiceTest(unittest.TestCase):
 
         self.assertEqual(service.sweep(), [("task", "EXECUTION_FAILED_FINAL", "execution-123")])
         self.assertEqual(task.execution.failure_code, "IMPLEMENTATION_SOURCE_UNAVAILABLE_FINAL")
+
+    def test_persists_stream_heartbeat_without_provider_content(self):
+        task, calls = ready_task(), []
+        tasks = type("Tasks", (), {"worker_health_verified": lambda _: [task]})()
+        transaction = type("Tx", (), {
+            "claim_implementation": lambda *_: None,
+            "record_implementation_progress": lambda _, current, record: calls.append((record.stream_events, record.last_progress_at)),
+            "record_result": lambda *_: None,
+        })()
+        client = type("Client", (), {"generate_artifact": lambda _self, **kwargs: (
+            kwargs["on_progress"](3), payload(task_id="task", spec_hash=task.spec.hash, base_commit=task.spec.base_commit)
+        )[1]})()
+        service = ImplementationExecutionService(tasks, transaction, lambda _: b"source", client, "kimi-k2.6", ImplementationArtifactHandoff(InMemoryImplementationArtifactStore()))
+
+        service.sweep()
+        self.assertEqual(calls[0][0], 3)
+        self.assertIsNotNone(calls[0][1])
