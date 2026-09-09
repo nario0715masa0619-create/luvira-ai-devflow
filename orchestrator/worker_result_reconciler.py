@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from artifact_handoff import ArtifactHandoff, ArtifactHandoffError
+from cloud_run_bootstrap_client import CloudRunBootstrapClientError
 from execution_platform import ExecutionPlatform, ExecutionRecord, V3Status, V3Task
 from execution_result_adapter import ExecutionResultAdapterError, extract_bootstrap_artifact
 from v3_worker_envelope import from_running_task
@@ -75,6 +76,27 @@ class WorkerResultReconciler:
                             )
                             outcomes.append((task.task_id, "WORKER_DISPATCH_RETRYABLE", record.execution_id))
                             continue
+                    except CloudRunBootstrapClientError as exc:
+                        if str(exc) == "cloud_run_execution_ambiguous":
+                            # This recovery path is only for records created
+                            # before launch-operation persistence existed.  The
+                            # isolated Worker has no provider, source-write,
+                            # GitHub, or secret capability, so several matching
+                            # health-probe jobs cannot have spent or changed
+                            # anything.  Return the task to the normal durable
+                            # retry path instead of stranding approval forever.
+                            ExecutionPlatform.fail_existing(
+                                task, record.execution_id,
+                                "WORKER_DISPATCH_AMBIGUOUS_RETRYABLE",
+                            )
+                            self._transaction.record_result(
+                                task, record,
+                                V3Status.EXECUTION_FAILED_RETRYABLE,
+                            )
+                            outcomes.append((task.task_id, "WORKER_DISPATCH_RETRYABLE", record.execution_id))
+                            continue
+                        outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", record.execution_id))
+                        continue
                     except Exception:
                         outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", record.execution_id))
                         continue
