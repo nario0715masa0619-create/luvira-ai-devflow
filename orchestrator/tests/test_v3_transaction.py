@@ -47,11 +47,50 @@ class V3TransactionTest(unittest.TestCase):
         task_snapshot.to_dict.return_value = task_payload(stored)
         self.task_ref.get.return_value = task_snapshot
 
-        with self.assertRaisesRegex(V3TransactionError, "v3_task_not_authorized"):
+        with self.assertRaisesRegex(V3TransactionError, "v3_task_not_queueable"):
             V3Transaction(self.client).queue_authorized(self.queued, self.record)
 
         self.transaction.update.assert_not_called()
         self.transaction.create.assert_not_called()
+
+    def test_replaces_only_a_retryable_execution_with_the_next_attempt(self):
+        stored = V3Task("task", self.spec, V3Status.EXECUTION_FAILED_RETRYABLE)
+        stored.execution = ExecutionRecord(
+            "previous-execution", "task", self.spec.hash, 1,
+            V3Status.EXECUTION_FAILED_RETRYABLE, failure_code="OPENCODE_TIMEOUT_RETRYABLE",
+        )
+        retry = V3Task("task", self.spec, V3Status.EXECUTION_QUEUED)
+        retry.audit = list(stored.audit) + ["EXECUTION_QUEUED"]
+        retry.execution = ExecutionRecord(
+            "next-execution", "task", self.spec.hash, 2, V3Status.EXECUTION_QUEUED,
+        )
+        task_snapshot = Mock(exists=True)
+        task_snapshot.to_dict.return_value = task_payload(stored)
+        self.task_ref.get.return_value = task_snapshot
+
+        V3Transaction(self.client).queue_authorized(retry, retry.execution)
+
+        self.transaction.update.assert_called_once()
+        self.assertEqual(retry.revision, 2)
+
+    def test_rejects_retry_that_does_not_advance_attempt_once(self):
+        stored = V3Task("task", self.spec, V3Status.EXECUTION_FAILED_RETRYABLE)
+        stored.execution = ExecutionRecord(
+            "previous-execution", "task", self.spec.hash, 1,
+            V3Status.EXECUTION_FAILED_RETRYABLE, failure_code="OPENCODE_TIMEOUT_RETRYABLE",
+        )
+        retry = V3Task("task", self.spec, V3Status.EXECUTION_QUEUED)
+        retry.execution = ExecutionRecord(
+            "next-execution", "task", self.spec.hash, 3, V3Status.EXECUTION_QUEUED,
+        )
+        task_snapshot = Mock(exists=True)
+        task_snapshot.to_dict.return_value = task_payload(stored)
+        self.task_ref.get.return_value = task_snapshot
+
+        with self.assertRaisesRegex(V3TransactionError, "retry_not_queueable"):
+            V3Transaction(self.client).queue_authorized(retry, retry.execution)
+
+        self.transaction.update.assert_not_called()
 
     def test_claims_queued_execution_once_before_external_launch(self):
         stored = self.queued

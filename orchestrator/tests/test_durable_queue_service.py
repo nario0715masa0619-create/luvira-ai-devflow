@@ -1,7 +1,7 @@
 import unittest
 
 from durable_queue_service import DurableQueueRejected, DurableQueueService
-from execution_platform import TaskSpec, V3Status, V3Task
+from execution_platform import ExecutionRecord, TaskSpec, V3Status, V3Task
 from execution_preflight import ExecutionPreflight, PreflightCheck, REQUIRED_CHECKS
 
 
@@ -76,3 +76,18 @@ class DurableQueueServiceTest(unittest.TestCase):
         self.assertEqual(task.status, V3Status.AUTHORIZED)
         self.assertIsNone(task.execution)
         self.assertEqual(task.audit, ["TASK_AUTHORIZED"])
+
+    def test_retry_queues_a_new_execution_with_the_next_attempt(self):
+        task = authorized_task()
+        task.status = V3Status.EXECUTION_FAILED_RETRYABLE
+        task.execution = ExecutionRecord(
+            "previous", task.task_id, task.spec.hash, 1,
+            V3Status.EXECUTION_FAILED_RETRYABLE, failure_code="OPENCODE_TIMEOUT_RETRYABLE",
+        )
+        transaction = Transaction()
+
+        record, _ = DurableQueueService(Reader(task), preflight(), transaction).request(task.task_id)
+
+        self.assertEqual(record.attempt, 2)
+        self.assertNotEqual(record.execution_id, "previous")
+        self.assertEqual(task.status, V3Status.EXECUTION_QUEUED)
