@@ -75,23 +75,36 @@ class ImplementationExecutionService:
             try:
                 envelope = envelope_from_task(task)
                 source = self._source_for_task(task)
+            except Exception:
+                # Source acquisition is a distinct, read-only boundary.  It
+                # must never be reported as an artifact rejection: no model
+                # request has happened yet, and recovery needs that fact.
+                self._fail(task, record, "IMPLEMENTATION_SOURCE_UNAVAILABLE_FINAL", outcomes)
+                continue
+            try:
                 payload = self._client.generate_artifact(
                     model=self._model, envelope=envelope, source_snapshot=source,
                 )
                 self._handoff.receive_from_broker(record.execution_id, envelope, payload)
-                ExecutionPlatform.verify_implementation_existing(task, record.execution_id)
-                self._transaction.record_result(task, record, V3Status.ARTIFACT_VERIFIED)
-                outcomes.append((task.task_id, "IMPLEMENTATION_ARTIFACT_VERIFIED", record.execution_id))
             except OpenCodeImplementationError as exc:
                 self._fail(task, record, exc.code, outcomes)
+                continue
             except ImplementationArtifactHandoffError as exc:
                 # The handoff includes only the verifier's stable error code.
                 # Preserve it in the durable failure record so recovery can be
                 # based on the failed contract rule, without retaining model
                 # output or source content.
                 self._fail(task, record, str(exc), outcomes)
+                continue
             except Exception:
-                self._fail(task, record, "IMPLEMENTATION_ARTIFACT_REJECTED_FINAL", outcomes)
+                self._fail(task, record, "IMPLEMENTATION_ARTIFACT_PROCESSING_UNAVAILABLE_FINAL", outcomes)
+                continue
+            try:
+                ExecutionPlatform.verify_implementation_existing(task, record.execution_id)
+                self._transaction.record_result(task, record, V3Status.ARTIFACT_VERIFIED)
+                outcomes.append((task.task_id, "IMPLEMENTATION_ARTIFACT_VERIFIED", record.execution_id))
+            except Exception:
+                self._fail(task, record, "IMPLEMENTATION_RESULT_PERSISTENCE_UNAVAILABLE_FINAL", outcomes)
         return outcomes
 
     def _fail(self, task, record, code: str, outcomes: list) -> None:

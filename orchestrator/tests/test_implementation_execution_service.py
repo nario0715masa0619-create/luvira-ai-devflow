@@ -86,3 +86,19 @@ class ImplementationExecutionServiceTest(unittest.TestCase):
 
         self.assertEqual(service.sweep(), [("task", "EXECUTION_FAILED_FINAL", "execution-123")])
         self.assertEqual(task.execution.failure_code, "artifact_schema_mismatch")
+
+    def test_source_failure_is_not_reported_as_an_artifact_rejection(self):
+        task = ready_task()
+        tasks = type("Tasks", (), {"worker_health_verified": lambda _: [task]})()
+        transaction = type("Tx", (), {
+            "claim_implementation": lambda *_: None,
+            "record_result": lambda *_: None,
+        })()
+        service = ImplementationExecutionService(
+            tasks, transaction,
+            lambda _: (_ for _ in ()).throw(ValueError("source unavailable")),
+            object(), "kimi-k2.6", object(),
+        )
+
+        self.assertEqual(service.sweep(), [("task", "EXECUTION_FAILED_FINAL", "execution-123")])
+        self.assertEqual(task.execution.failure_code, "IMPLEMENTATION_SOURCE_UNAVAILABLE_FINAL")
