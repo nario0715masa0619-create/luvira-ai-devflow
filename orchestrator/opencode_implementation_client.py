@@ -47,7 +47,7 @@ def _prompt(envelope: dict[str, Any], source: str) -> str:
             "Return a JSON object with exactly the contract.required_fields plus schema and publication; do not omit or add fields.",
             "diff_b64 must be base64 for a non-empty UTF-8 unified diff. Every changed file must have consecutive --- a/path and +++ b/path headers.",
             "changed_paths must be the sorted unique paths from the +++ diff headers, and every path must be within allowed_paths.",
-            "tests must be a non-empty array of {name,status}; status is only passed or skipped. Do not claim a test passed unless it is represented truthfully.",
+            "tests must be an array of {name,status}; status is only passed or skipped. Leave it empty unless a result is actually available; GitHub CI is the merge gate.",
             "Do not change protected paths, include secrets, use /dev/null paths, or include prose outside the JSON object.",
         ],
         "source_snapshot": source,

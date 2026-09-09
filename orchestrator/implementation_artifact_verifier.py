@@ -119,7 +119,12 @@ def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any]) -> 
     if any(not any(path == prefix.rstrip("/") or path.startswith(prefix.rstrip("/") + "/") for prefix in allowed) for path in paths):
         raise ImplementationArtifactError("artifact_path_out_of_scope")
     tests = artifact["tests"]
-    if not isinstance(tests, list) or not tests:
+    # The generation provider cannot execute the repository's test suite.
+    # Treating its self-reported test result as a publication gate both
+    # encourages hallucinated "passed" claims and rejects honest empty
+    # reports.  The generated draft PR is instead verified by the repository's
+    # required GitHub checks before any human can merge it.
+    if not isinstance(tests, list):
         raise ImplementationArtifactError("artifact_tests_required")
     normalized_tests = []
     for item in tests:

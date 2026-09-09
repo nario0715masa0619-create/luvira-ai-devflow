@@ -23,7 +23,7 @@ class ImplementationArtifactHandoffTest(unittest.TestCase):
         self.handoff.receive_from_broker("execution-123", ENVELOPE, payload())
         with self.assertRaisesRegex(ImplementationArtifactHandoffError, "replayed"):
             self.handoff.receive_from_broker("execution-123", ENVELOPE, payload())
-        with self.assertRaisesRegex(ImplementationArtifactHandoffError, "rejected"):
+        with self.assertRaisesRegex(ImplementationArtifactHandoffError, "artifact_schema_mismatch"):
             self.handoff.receive_from_broker("execution-456", ENVELOPE, b"{}")
 
 
