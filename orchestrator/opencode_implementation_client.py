@@ -90,6 +90,10 @@ class OpenCodeImplementationClient:
             "messages": [{"role": "user", "content": _prompt(envelope, source)}],
             "temperature": 0,
             "stream": True,
+            # The Go endpoint is OpenAI-chat-compatible.  Require the
+            # transport to constrain the response as JSON instead of relying
+            # solely on a natural-language instruction after a long stream.
+            "response_format": {"type": "json_object"},
         }).encode("utf-8")
         request = Request(ENDPOINT, data=body, method="POST", headers={
             "Authorization": f"Bearer {self._api_key}",
@@ -108,10 +112,25 @@ class OpenCodeImplementationClient:
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             raise OpenCodeImplementationError("OPENCODE_PROTOCOL_FINAL") from exc
         try:
-            artifact = json.loads(content)
+            artifact = self._decode_artifact(content)
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            raise OpenCodeImplementationError("OPENCODE_PROTOCOL_FINAL") from exc
+            # A completed stream with a non-JSON artifact is a provider
+            # output failure, not a permanently invalid approved task.  The
+            # durable queue may make a bounded retry with the structured
+            # response contract; it never retains the model output.
+            raise OpenCodeImplementationError("OPENCODE_ARTIFACT_INVALID_RETRYABLE") from exc
         return json.dumps(artifact, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+    @staticmethod
+    def _decode_artifact(content: str) -> Any:
+        """Decode a JSON response without accepting arbitrary surrounding prose."""
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError as direct_error:
+            stripped = content.strip()
+            if not (stripped.startswith("```json\n") and stripped.endswith("\n```")):
+                raise direct_error
+            return json.loads(stripped[len("```json\n"):-len("\n```")])
 
     def _read_stream(self, response, on_progress: Callable[[int], None] | None) -> str:
         """Read OpenAI-compatible SSE and retain only the resulting artifact."""
