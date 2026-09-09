@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from artifact_handoff import ArtifactHandoff
+from artifact_handoff import ArtifactHandoff, ArtifactHandoffError
 from execution_platform import ExecutionPlatform, ExecutionRecord, V3Status, V3Task
-from execution_result_adapter import extract_bootstrap_artifact
+from execution_result_adapter import ExecutionResultAdapterError, extract_bootstrap_artifact
 from v3_worker_envelope import from_running_task
 
 
@@ -97,10 +97,18 @@ class WorkerResultReconciler:
                 ExecutionPlatform.verify_worker_health_existing(task, record.execution_id)
                 self._transaction.record_result(task, record, V3Status.WORKER_HEALTH_VERIFIED)
                 outcomes.append((task.task_id, "WORKER_HEALTH_VERIFIED", record.external_operation_id))
+            except ExecutionResultAdapterError as exc:
+                ExecutionPlatform.fail_existing(task, record.execution_id, str(exc))
+                self._transaction.record_result(task, record, V3Status.EXECUTION_FAILED_FINAL)
+                outcomes.append((task.task_id, str(exc), record.execution_id))
+            except ArtifactHandoffError as exc:
+                ExecutionPlatform.fail_existing(task, record.execution_id, str(exc))
+                self._transaction.record_result(task, record, V3Status.EXECUTION_FAILED_FINAL)
+                outcomes.append((task.task_id, str(exc), record.execution_id))
             except Exception:
                 # Artifact integrity failures are not retried automatically:
                 # repeated reads must never turn untrusted bytes into a result.
-                ExecutionPlatform.fail_existing(task, record.execution_id, "WORKER_ARTIFACT_REJECTED_FINAL")
+                ExecutionPlatform.fail_existing(task, record.execution_id, "WORKER_RESULT_PROCESSING_UNAVAILABLE_FINAL")
                 self._transaction.record_result(task, record, V3Status.EXECUTION_FAILED_FINAL)
-                outcomes.append((task.task_id, "ARTIFACT_REJECTED_FINAL", record.execution_id))
+                outcomes.append((task.task_id, "WORKER_RESULT_PROCESSING_UNAVAILABLE_FINAL", record.execution_id))
         return outcomes
