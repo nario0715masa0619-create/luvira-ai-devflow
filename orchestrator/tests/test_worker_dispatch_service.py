@@ -21,21 +21,23 @@ class WorkerDispatchServiceTest(unittest.TestCase):
         calls = []
         transaction = type("Transaction", (), {
             "begin_queued": lambda _, current, record: calls.append(("claim", current.status, record.status)),
+            "record_launch_operation": lambda _, current, record: calls.append(("launch", record.launch_operation_id)),
             "record_external_operation": lambda _, current, record: calls.append(("bind", record.external_operation_id)),
         })()
-        worker = type("Worker", (), {"start": lambda _, envelope: calls.append(("start", envelope)) or "run-123"})()
+        worker = type("Worker", (), {"start_operation": lambda _, envelope: calls.append(("start", envelope)) or "operations/123"})()
         service = WorkerDispatchService(type("Tasks", (), {"get": lambda _, __: task})(), transaction, worker)
 
-        self.assertEqual(service.dispatch("task", "execution"), "run-123")
+        self.assertEqual(service.dispatch("task", "execution"), "operations/123")
         self.assertEqual(calls[0], ("claim", V3Status.EXECUTION_RUNNING, V3Status.EXECUTION_RUNNING))
         self.assertEqual(calls[1][0], "start")
-        self.assertEqual(calls[2], ("bind", "run-123"))
-        self.assertEqual(task.execution.external_operation_id, "run-123")
+        self.assertEqual(calls[2], ("launch", "operations/123"))
+        self.assertEqual(task.execution.launch_operation_id, "operations/123")
+        self.assertIsNone(task.execution.external_operation_id)
 
     def test_start_failure_does_not_requeue_or_duplicate_work(self):
         task = queued_task()
-        transaction = type("Transaction", (), {"begin_queued": lambda *args: None, "record_external_operation": lambda *args: None})()
-        worker = type("Worker", (), {"start": lambda *_: (_ for _ in ()).throw(TimeoutError())})()
+        transaction = type("Transaction", (), {"begin_queued": lambda *args: None, "record_launch_operation": lambda *args: None, "record_external_operation": lambda *args: None})()
+        worker = type("Worker", (), {"start_operation": lambda *_: (_ for _ in ()).throw(TimeoutError())})()
         service = WorkerDispatchService(type("Tasks", (), {"get": lambda _, __: task})(), transaction, worker)
 
         with self.assertRaisesRegex(WorkerDispatcherError, "outcome_unknown"):

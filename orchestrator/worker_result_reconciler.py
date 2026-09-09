@@ -15,11 +15,13 @@ class RunningTaskReader(Protocol):
 
 
 class ResultTransaction(Protocol):
+    def record_launch_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
     def record_external_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
     def record_result(self, task: V3Task, record: ExecutionRecord, expected_status: V3Status) -> None: ...
 
 
 class WorkerStateReader(Protocol):
+    def execution_for_operation(self, operation_name: str) -> str | None: ...
     def find_execution_for_task(self, task_id: str, spec_hash: str) -> str | None: ...
     def completion_state(self, execution_id: str) -> str: ...
 
@@ -47,10 +49,15 @@ class WorkerResultReconciler:
             if record is None or not record.external_operation_id:
                 if record is not None:
                     try:
-                        recovered = self._worker.find_execution_for_task(task.task_id, task.spec.hash)
+                        recovered = (self._worker.execution_for_operation(record.launch_operation_id)
+                                     if record.launch_operation_id else
+                                     self._worker.find_execution_for_task(task.task_id, task.spec.hash))
                         if recovered:
                             record.external_operation_id = recovered
                             self._transaction.record_external_operation(task, record)
+                        elif record.launch_operation_id:
+                            outcomes.append((task.task_id, "WORKER_LAUNCH_PENDING", record.launch_operation_id))
+                            continue
                         else:
                             # The Worker API never accepted a matching
                             # execution.  Retrying is safe: no isolated

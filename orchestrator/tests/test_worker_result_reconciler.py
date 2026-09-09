@@ -56,6 +56,21 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         self.assertEqual(task.execution.failure_code, "WORKER_DISPATCH_NOT_ACCEPTED_RETRYABLE")
         self.assertEqual(writes, [(V3Status.EXECUTION_FAILED_RETRYABLE, V3Status.EXECUTION_FAILED_RETRYABLE)])
 
+    def test_launch_operation_is_reconciled_without_searching_for_a_duplicate(self):
+        task = running_task()
+        task.execution.external_operation_id = None
+        task.execution.launch_operation_id = "operations/123"
+        writes = []
+        tasks = type("Tasks", (), {"running": lambda _: [task]})()
+        transaction = type("Tx", (), {"record_external_operation": lambda *_: writes.append("bound"), "record_result": lambda *_: None})()
+        worker = type("Worker", (), {"execution_for_operation": lambda _, __: "run-456", "completion_state": lambda *_: "PENDING"})()
+        logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
+        reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))
+
+        self.assertEqual(reconciler.sweep(), [("task", "WORKER_RUNNING", "run-456")])
+        self.assertEqual(task.execution.external_operation_id, "run-456")
+        self.assertEqual(writes, ["bound"])
+
     def test_malformed_artifact_fails_closed(self):
         task = running_task()
         reconciler, writes = self.reconciler(task, "SUCCEEDED", "not an artifact")
