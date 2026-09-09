@@ -39,6 +39,7 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         self.assertNotIn(api_key.encode(), calls[0][0].data)
         request_body = json.loads(calls[0][0].data)
         self.assertTrue(request_body["stream"])
+        self.assertEqual(request_body["response_format"], {"type": "json_object"})
         self.assertEqual(calls[0][0].get_header("X-opencode-session"), "luvira-0d9907cf80722b6e7d79ddfcc4ec1ba4")
         prompt = json.loads(request_body["messages"][0]["content"])
         self.assertTrue(any("diff_b64" in rule for rule in prompt["artifact_rules"]))
@@ -66,6 +67,23 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
             source_snapshot=b"x", on_progress=progress.append,
         )
         self.assertEqual(progress, [1, 2])
+
+    def test_accepts_only_a_complete_json_fence_as_a_compatibility_fallback(self):
+        events = [
+            {"choices": [{"delta": {"content": "```json\\n{\\\"schema\\\": \\\"luvira.devflow.implementation-artifact.v1\\\"}\\n```"}}]},
+            "[DONE]",
+        ]
+        events = [
+            {"choices": [{"delta": {"content": "```json" + chr(10) + '{"schema":"luvira.devflow.implementation-artifact.v1"}' + chr(10) + "```"}}]},
+            "[DONE]",
+        ]
+        client = OpenCodeImplementationClient("secret", lambda *_, **__: Response(events))
+        result = client.generate_artifact(
+            model="kimi-k2.6",
+            envelope={"task_id":"t", "spec_hash":"a" * 64, "base_commit":"b" * 40, "allowed_paths":["src/"], "acceptance_criteria":["test"]},
+            source_snapshot=b"x",
+        )
+        self.assertEqual(json.loads(result)["schema"], "luvira.devflow.implementation-artifact.v1")
 
     def test_rejects_invalid_source_before_network(self):
         client = OpenCodeImplementationClient("secret", lambda *_: self.fail("network"))
