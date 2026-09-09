@@ -49,6 +49,10 @@ class GitHubReadOnlySource:
             lambda sha: self._get(f"/repos/{repo}/git/blobs/{quote(str(sha), safe='')}")
         )
         try:
-            return builder.build(base_commit, allowed_paths)
+            # The Broker client accepts only raw bytes.  Keep the richer
+            # SourceSnapshot object inside this read adapter so it cannot leak
+            # across the provider boundary and turn a valid source read into
+            # an unclassified implementation failure.
+            return builder.build(base_commit, allowed_paths).content
         except ValueError as exc:
             raise GitHubSourceReadError(str(exc)) from exc
