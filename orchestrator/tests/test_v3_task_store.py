@@ -38,3 +38,16 @@ class V3TaskStoreTest(unittest.TestCase):
         with self.assertRaisesRegex(V3TaskStoreError, "stale_revision"):
             self.store.save(task())
         self.reference.update.assert_not_called()
+
+    def test_invalid_terminal_record_does_not_block_a_valid_record(self):
+        invalid, valid = Mock(), Mock()
+        invalid.id, valid.id = "invalid", "valid"
+        broken = task_payload(task()); broken["spec_hash"] = "broken"
+        invalid.to_dict.return_value = broken
+        valid.to_dict.return_value = task_payload(task())
+        query = Mock(); query.stream.return_value = [invalid, valid]
+        self.collection.where.return_value = query
+
+        records = list(self.store.artifact_verified())
+
+        self.assertEqual([record.task_id for record in records], ["task-1"])

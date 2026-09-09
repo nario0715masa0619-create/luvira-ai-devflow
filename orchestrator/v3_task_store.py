@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from google.api_core.exceptions import AlreadyExists
@@ -100,21 +101,31 @@ class FirestoreV3TaskStore:
 
     def eligible(self):
         """Read only tasks the autonomous broker may safely retry."""
-        for snapshot in self._collection.where("status", "in", [
+        return self._with_status([
             V3Status.AUTHORIZED.value, V3Status.EXECUTION_FAILED_RETRYABLE.value,
-        ]).stream():
-            yield task_from_payload(snapshot.to_dict())
+        ])
 
     def running(self):
         """Read claimed executions for result reconciliation only."""
-        for snapshot in self._collection.where("status", "==", V3Status.EXECUTION_RUNNING.value).stream():
-            yield task_from_payload(snapshot.to_dict())
+        return self._with_status(V3Status.EXECUTION_RUNNING.value)
 
     def worker_health_verified(self):
         """Tasks eligible for exactly one Broker-held implementation request."""
-        for snapshot in self._collection.where("status", "==", V3Status.WORKER_HEALTH_VERIFIED.value).stream():
-            yield task_from_payload(snapshot.to_dict())
+        return self._with_status(V3Status.WORKER_HEALTH_VERIFIED.value)
 
     def artifact_verified(self):
-        for snapshot in self._collection.where("status", "==", V3Status.ARTIFACT_VERIFIED.value).stream():
-            yield task_from_payload(snapshot.to_dict())
+        return self._with_status(V3Status.ARTIFACT_VERIFIED.value)
+
+    def _with_status(self, status):
+        """Yield valid records without allowing one stale record to stop the queue.
+
+        A task whose immutable hash no longer validates is quarantined by its
+        existing terminal state and is never executed or published.  The
+        scheduler must nevertheless continue to process unrelated valid tasks.
+        """
+        query = self._collection.where("status", "in", status) if isinstance(status, list) else self._collection.where("status", "==", status)
+        for snapshot in query.stream():
+            try:
+                yield task_from_payload(snapshot.to_dict())
+            except V3TaskStoreError as exc:
+                logging.error("V3_TASK_SKIPPED_INVALID_RECORD id=%s reason=%s", snapshot.id, str(exc))
