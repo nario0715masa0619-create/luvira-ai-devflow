@@ -47,9 +47,16 @@ class SourceSnapshotBuilder:
         for path, sha in sorted(selected):
             blob = self._read_blob(sha)
             try:
-                content = base64.b64decode(blob["content"], validate=True)
+                # GitHub wraps blob content as Base64 text.  Remove only
+                # transport whitespace, then strictly validate the payload.
+                encoded = blob["content"]
+                if not isinstance(encoded, str):
+                    raise TypeError("blob content must be text")
+                content = base64.b64decode(
+                    encoded.encode("ascii").translate(None, b" \t\r\n"), validate=True,
+                )
                 text = content.decode("utf-8")
-            except (KeyError, TypeError, ValueError, UnicodeDecodeError) as exc:
+            except (KeyError, TypeError, ValueError, UnicodeDecodeError, UnicodeEncodeError) as exc:
                 raise SourceSnapshotError("source_snapshot_blob_invalid") from exc
             total += len(content)
             if total > MAX_SNAPSHOT_BYTES:
