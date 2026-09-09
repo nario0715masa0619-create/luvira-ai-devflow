@@ -51,6 +51,15 @@ class ExecutionPlatformTest(unittest.TestCase):
         with self.assertRaisesRegex(TransitionRejected, "approval_binding_mismatch"):
             platform.authorize(task.task_id, waiting.approval_binding)
 
+    def test_mutated_source_scope_breaks_approval_binding(self):
+        platform = ExecutionPlatform()
+        task = platform.create(spec(), "task-source-scope")
+        platform.validate(task.task_id)
+        waiting = platform.request_approval(task.task_id)
+        object.__setattr__(task.spec, "source_paths", ("docs/",))
+        with self.assertRaisesRegex(TransitionRejected, "approval_binding_mismatch"):
+            platform.authorize(task.task_id, waiting.approval_binding)
+
     def test_external_failures_are_classified_without_response_body(self):
         self.assertEqual(classify_external_failure(403), "HTTP_403_FINAL")
         self.assertEqual(classify_external_failure(409), "HTTP_409_RETRYABLE")
