@@ -14,3 +14,15 @@ class SourceSnapshotTest(unittest.TestCase):
         builder = SourceSnapshotBuilder(lambda _: [], lambda _: {})
         with self.assertRaisesRegex(SourceSnapshotError, "scope_invalid"):
             builder.build("a" * 40, ("src/",))
+
+    def test_accepts_github_wrapped_base64_blob_content(self):
+        encoded = base64.b64encode(b"print(1)\n").decode()
+        wrapped = encoded[:4] + "\n" + encoded[4:]
+        builder = SourceSnapshotBuilder(
+            lambda _: [{"type": "blob", "path": "README.md", "sha": "a"}],
+            lambda _: {"content": wrapped},
+        )
+
+        snapshot = builder.build("a" * 40, ("README.md",))
+
+        self.assertEqual(snapshot.content, b"--- README.md\nprint(1)\n\n")
