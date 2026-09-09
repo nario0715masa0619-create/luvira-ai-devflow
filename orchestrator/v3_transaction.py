@@ -43,12 +43,22 @@ class V3Transaction:
             if not task_snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(task_snapshot.to_dict())
-            if stored.status is not V3Status.AUTHORIZED:
-                raise V3TransactionError("v3_task_not_authorized")
+            if stored.status is V3Status.AUTHORIZED:
+                if stored.execution is not None or record.attempt != 1:
+                    raise V3TransactionError("v3_task_not_queueable")
+            elif stored.status is V3Status.EXECUTION_FAILED_RETRYABLE:
+                # A retry replaces only a terminal retryable execution.  Its
+                # attempt must advance exactly once, which prevents both
+                # replaying the old provider claim and skipping attempts.
+                if (stored.execution is None
+                        or stored.execution.status is not V3Status.EXECUTION_FAILED_RETRYABLE
+                        or record.attempt != stored.execution.attempt + 1
+                        or record.execution_id == stored.execution.execution_id):
+                    raise V3TransactionError("v3_task_retry_not_queueable")
+            else:
+                raise V3TransactionError("v3_task_not_queueable")
             if stored.spec.hash != task.spec.hash or stored.revision != task.revision:
                 raise V3TransactionError("v3_task_stale_or_modified")
-            if stored.execution is not None:
-                raise V3TransactionError("v3_execution_already_exists")
             payload = task_payload(task)
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
