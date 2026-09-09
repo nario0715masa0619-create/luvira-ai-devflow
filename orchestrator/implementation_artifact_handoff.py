@@ -115,7 +115,10 @@ class ImplementationArtifactHandoff:
         try:
             artifact = verify_implementation_artifact(payload, envelope)
         except ImplementationArtifactError as exc:
-            raise ImplementationArtifactHandoffError("implementation_artifact_rejected") from exc
+            # Persist only the verifier code, never the model response or
+            # source snapshot.  Operators can distinguish a contract mismatch
+            # from an unsafe diff without exposing provider content in logs.
+            raise ImplementationArtifactHandoffError(f"implementation_artifact_{exc}") from exc
         record = VerifiedImplementationArtifactRecord(
             execution_id=execution_id,
             artifact_sha256=hashlib.sha256(payload).hexdigest(),

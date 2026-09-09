@@ -25,7 +25,7 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         request_body = json.loads(calls[0][0].data)
         prompt = json.loads(request_body["messages"][0]["content"])
         self.assertTrue(any("diff_b64" in rule for rule in prompt["artifact_rules"]))
-        self.assertTrue(any("tests must be a non-empty" in rule for rule in prompt["artifact_rules"]))
+        self.assertTrue(any("GitHub CI is the merge gate" in rule for rule in prompt["artifact_rules"]))
 
     def test_rejects_invalid_source_before_network(self):
         client = OpenCodeImplementationClient("secret", lambda *_: self.fail("network"))

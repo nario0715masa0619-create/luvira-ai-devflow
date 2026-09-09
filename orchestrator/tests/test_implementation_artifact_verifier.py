@@ -22,6 +22,10 @@ class ImplementationArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(result.changed_paths, ("src/example.py",))
         self.assertEqual(result.tests[0]["status"], "passed")
 
+    def test_accepts_an_empty_test_report_for_provider_generated_diffs(self):
+        result = verify_implementation_artifact(payload(tests=[]), ENVELOPE)
+        self.assertEqual(result.tests, ())
+
     def test_rejects_path_outside_the_approved_scope(self):
         diff = b"--- a/docs/x.md\n+++ b/docs/x.md\n@@ -1 +1 @@\n-old\n+new\n"
         with self.assertRaisesRegex(ImplementationArtifactError, "out_of_scope"):
