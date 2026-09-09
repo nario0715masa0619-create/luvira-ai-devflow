@@ -43,6 +43,13 @@ def _prompt(envelope: dict[str, Any], source: str) -> str:
             "required_fields": ["schema", "task_id", "spec_hash", "base_commit", "diff_b64", "changed_paths", "tests", "publication"],
         },
         "acceptance_criteria": envelope["acceptance_criteria"],
+        "artifact_rules": [
+            "Return a JSON object with exactly the contract.required_fields plus schema and publication; do not omit or add fields.",
+            "diff_b64 must be base64 for a non-empty UTF-8 unified diff. Every changed file must have consecutive --- a/path and +++ b/path headers.",
+            "changed_paths must be the sorted unique paths from the +++ diff headers, and every path must be within allowed_paths.",
+            "tests must be a non-empty array of {name,status}; status is only passed or skipped. Do not claim a test passed unless it is represented truthfully.",
+            "Do not change protected paths, include secrets, use /dev/null paths, or include prose outside the JSON object.",
+        ],
         "source_snapshot": source,
     }, ensure_ascii=False, separators=(",", ":"))
 
