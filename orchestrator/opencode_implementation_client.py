@@ -147,10 +147,23 @@ class OpenCodeImplementationClient:
             if raw == "[DONE]":
                 return True
             payload = json.loads(raw)
-            try:
-                content = payload["choices"][0]["delta"].get("content", "")
-            except (KeyError, IndexError, TypeError, AttributeError) as exc:
-                raise ValueError("stream_event_invalid") from exc
+            if not isinstance(payload, dict):
+                raise ValueError("stream_event_invalid")
+            choices = payload.get("choices")
+            # OpenAI-compatible providers can emit a final usage or terminal
+            # frame after all text deltas.  It is protocol metadata, not a
+            # malformed artifact chunk, and must not discard a completed
+            # long-running generation.
+            if choices is None or choices == []:
+                return False
+            if not isinstance(choices, list) or not isinstance(choices[0], dict):
+                raise ValueError("stream_event_invalid")
+            delta = choices[0].get("delta")
+            if delta is None:
+                return False
+            if not isinstance(delta, dict):
+                raise ValueError("stream_event_invalid")
+            content = delta.get("content", "")
             if not isinstance(content, str):
                 raise ValueError("stream_content_invalid")
             fragments.append(content)
