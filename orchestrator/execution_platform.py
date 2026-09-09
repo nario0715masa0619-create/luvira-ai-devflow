@@ -81,6 +81,7 @@ class TaskSpec:
     max_cost_usd: float
     expiry: str
     allowed_paths: tuple[str, ...]
+    source_paths: tuple[str, ...]
     model_policy: str
     # Immutable non-execution approval facts (issue source, impact, exclusions
     # and the human-visible approval statement).  They are part of the hash,
@@ -97,7 +98,12 @@ class TaskSpec:
                 requested_action=value["requested_action"],
                 acceptance_criteria=tuple(value["acceptance_criteria"]),
                 max_cost_usd=float(budget["max_cost_usd"]), expiry=value["expiry"],
-                allowed_paths=tuple(scope["allowed_paths"]), model_policy=value["model_policy"],
+                allowed_paths=tuple(scope["allowed_paths"]),
+                # The public Issue Form always requires ``source_paths``.
+                # Retain an in-process compatibility default solely for old
+                # unit fixtures and already terminal historical records; the
+                # webhook parser below never creates a new task this way.
+                source_paths=tuple(scope.get("source_paths", scope["allowed_paths"])), model_policy=value["model_policy"],
                 approval_context=dict(value.get("approval_context", {})),
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -105,10 +111,13 @@ class TaskSpec:
         if (not instance.repository or "/" not in instance.repository or not instance.base_commit
                 or not instance.requested_action or not instance.acceptance_criteria
                 or instance.max_cost_usd <= 0 or not instance.expiry or not instance.allowed_paths
+                or not instance.source_paths
                 or not instance.model_policy or not isinstance(instance.approval_context, dict)):
             raise ExecutionPlatformError("task_spec_invalid")
         if any(not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/") for path in instance.allowed_paths):
             raise ExecutionPlatformError("task_scope_invalid")
+        if any(not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/") for path in instance.source_paths):
+            raise ExecutionPlatformError("task_source_scope_invalid")
         return instance
 
     def canonical_dict(self) -> dict[str, Any]:
@@ -117,7 +126,10 @@ class TaskSpec:
             "requested_action": self.requested_action,
             "acceptance_criteria": list(self.acceptance_criteria),
             "budget": {"max_cost_usd": self.max_cost_usd}, "expiry": self.expiry,
-            "execution_scope": {"allowed_paths": list(self.allowed_paths)},
+            "execution_scope": {
+                "allowed_paths": list(self.allowed_paths),
+                "source_paths": list(self.source_paths),
+            },
             "model_policy": self.model_policy,
         }
         if self.approval_context:

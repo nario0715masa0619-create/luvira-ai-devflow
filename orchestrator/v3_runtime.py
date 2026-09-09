@@ -129,7 +129,7 @@ def create_v3_queue_service(
         tasks, transaction,
         lambda task: GitHubReadOnlySource(
             task.spec.repository, source_token_for_repository(task.spec.repository),
-        ).snapshot(task.spec.base_commit, task.spec.allowed_paths),
+        ).snapshot(task.spec.base_commit, task.spec.source_paths),
         OpenCodeImplementationClient(implementation_api_key),
         implementation_model,
         ImplementationArtifactHandoff(implementation_store),

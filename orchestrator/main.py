@@ -405,7 +405,7 @@ def approval_issue_spec(payload, repository, issue_number):
     form = {label: issue_form_value(body, label) for label in (
         "Project ID", "Repository", "承認すること", "タスク種別", "受入条件",
         "最大コスト（USD）", "影響", "しないこと", "許可を求める最初のアクション", "有効期限（UTC）",
-        "許可するリポジトリ内パス",
+        "許可するリポジトリ内パス", "参照を許可するリポジトリ内パス",
     )}
     if form["Repository"] != repository:
         raise ValueError("repository_form_mismatch")
@@ -418,6 +418,7 @@ def approval_issue_spec(payload, repository, issue_number):
         raise ValueError("invalid_approval_form")
     try:
         allowed_paths = json.loads(form["許可するリポジトリ内パス"])
+        source_paths = json.loads(form["参照を許可するリポジトリ内パス"])
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("invalid_execution_scope") from exc
     return {
@@ -426,7 +427,7 @@ def approval_issue_spec(payload, repository, issue_number):
         "acceptance_criteria": criteria,
         "budget": {"max_cost_usd": max_cost_usd},
         "requested_action": form["許可を求める最初のアクション"],
-        "execution_scope": {"allowed_paths": allowed_paths},
+        "execution_scope": {"allowed_paths": allowed_paths, "source_paths": source_paths},
         "expiry": form["有効期限（UTC）"],
         "model_policy": "none" if form["タスク種別"] == "validation" else "low-cost-first:" + ",".join(RUNNER_ORDER),
         "approval_context": {

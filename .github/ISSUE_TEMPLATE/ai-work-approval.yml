@@ -71,6 +71,13 @@ body:
       description: JSON配列で指定。承認後の変更はできません。例: ["README.md", "src/"]
     validations:
       required: true
+  - type: textarea
+    id: source_paths
+    attributes:
+      label: 参照を許可するリポジトリ内パス
+      description: JSON配列で指定。実装モデルが読み取れる既存ファイル・ディレクトリだけを列挙する。変更許可パスとは別に承認されます。例: ["README.md", "docs/"]
+    validations:
+      required: true
   - type: dropdown
     id: requested_action
     attributes:

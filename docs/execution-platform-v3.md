@@ -45,11 +45,15 @@
 人間が承認する `TaskSpec` は次をすべて含み、hashとapproval bindingの対象にする。
 
 - repository、base commit、requested action、受入条件、予算、期限
-- `execution_scope.allowed_paths`（正規化済みの相対パス許可リスト）
+- `execution_scope.allowed_paths`（変更を許可する正規化済みの相対パス許可リスト）
+- `execution_scope.source_paths`（実装モデルが参照を許可された既存ファイルの正規化済み相対パス許可リスト）
 - 実装モデルの選択規則と最大退避回数
 - 許可しない操作、公開先、必要な品質ゲート
 
-承認後に上記のどれかを変える場合は、新しいtaskと承認が必要である。
+承認後に上記のどれかを変える場合は、新しいtaskと承認が必要である。`allowed_paths` と
+`source_paths` は同じ意味ではない。新規ファイルだけを変更するtaskでも、モデルが読む既存
+ドキュメントは `source_paths` で明示する。これにより、出力先が未作成であることをソース取得
+失敗として扱う設計不備を防ぐ。
 
 ## 永続状態機械
 

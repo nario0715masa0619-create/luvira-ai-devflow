@@ -251,6 +251,9 @@ No writes
 ### 許可するリポジトリ内パス
 
 ["README.md"]
+### 参照を許可するリポジトリ内パス
+
+["README.md", "docs/"]
 ### 許可を求める最初のアクション
 
 read
@@ -269,6 +272,7 @@ read
         self.assertEqual(spec["approval_context"]["task_type"], "documentation")
         self.assertEqual(spec["acceptance_criteria"], ["README is reviewed"])
         self.assertEqual(spec["budget"], {"max_cost_usd": 1.0})
+        self.assertEqual(spec["execution_scope"]["source_paths"], ["README.md", "docs/"])
         self.assertEqual(spec["approval_context"]["source"]["issue_number"], 31)
 
     def test_approval_issue_form_preserves_an_explicit_implementation_request(self):
