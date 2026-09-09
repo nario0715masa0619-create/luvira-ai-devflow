@@ -23,9 +23,22 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         self.assertEqual(json.loads(result)["schema"], "luvira.devflow.implementation-artifact.v1")
         self.assertNotIn(api_key.encode(), calls[0][0].data)
         request_body = json.loads(calls[0][0].data)
+        self.assertEqual(calls[0][0].get_header("X-opencode-session"), "luvira-0d9907cf80722b6e7d79ddfcc4ec1ba4")
         prompt = json.loads(request_body["messages"][0]["content"])
         self.assertTrue(any("diff_b64" in rule for rule in prompt["artifact_rules"]))
         self.assertTrue(any("GitHub CI is the merge gate" in rule for rule in prompt["artifact_rules"]))
+
+    def test_session_id_is_stable_for_the_same_approved_task(self):
+        calls = []
+        def transport(request, timeout):
+            calls.append(request)
+            return Response({"choices": [{"message": {"content": '{"schema":"luvira.devflow.implementation-artifact.v1"}'}}]})
+        client = OpenCodeImplementationClient("secret", transport)
+        envelope = {"task_id":"t", "spec_hash":"a" * 64, "base_commit":"b" * 40, "allowed_paths":["src/"], "acceptance_criteria":["test"]}
+        client.generate_artifact(model="kimi-k2.6", envelope=envelope, source_snapshot=b"x")
+        client.generate_artifact(model="kimi-k2.6", envelope=envelope, source_snapshot=b"x")
+        self.assertEqual(calls[0].get_header("X-opencode-session"), calls[1].get_header("X-opencode-session"))
+        self.assertNotIn("secret", calls[0].get_header("X-opencode-session"))
 
     def test_rejects_invalid_source_before_network(self):
         client = OpenCodeImplementationClient("secret", lambda *_: self.fail("network"))
