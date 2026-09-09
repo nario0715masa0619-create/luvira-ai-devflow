@@ -7,6 +7,7 @@ to the verifier without logging provider content.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
@@ -54,6 +55,12 @@ def _prompt(envelope: dict[str, Any], source: str) -> str:
     }, ensure_ascii=False, separators=(",", ":"))
 
 
+def _session_id(envelope: dict[str, Any]) -> str:
+    """Return one stable, non-sensitive provider session per approved task."""
+    value = f"{envelope['task_id']}:{envelope['spec_hash']}".encode("utf-8")
+    return f"luvira-{hashlib.sha256(value).hexdigest()[:32]}"
+
+
 class OpenCodeImplementationClient:
     """Uses a Broker-held key; callers receive no provider response metadata."""
 
@@ -78,6 +85,7 @@ class OpenCodeImplementationClient:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
             "User-Agent": "luvira-devflow-broker/1",
+            "x-opencode-session": _session_id(envelope),
         })
         try:
             with self._transport(request, timeout=90) as response:
