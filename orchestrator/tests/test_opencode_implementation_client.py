@@ -68,6 +68,19 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         )
         self.assertEqual(progress, [1, 2])
 
+    def test_ignores_terminal_usage_frame_after_content(self):
+        events = artifact_events()[:-1] + [
+            {"choices": [], "usage": {"total_tokens": 1}},
+            "[DONE]",
+        ]
+        client = OpenCodeImplementationClient("secret", lambda *_, **__: Response(events))
+        result = client.generate_artifact(
+            model="kimi-k2.6",
+            envelope={"task_id":"t", "spec_hash":"a" * 64, "base_commit":"b" * 40, "allowed_paths":["src/"], "acceptance_criteria":["test"]},
+            source_snapshot=b"x",
+        )
+        self.assertEqual(json.loads(result)["schema"], "luvira.devflow.implementation-artifact.v1")
+
     def test_accepts_only_a_complete_json_fence_as_a_compatibility_fallback(self):
         events = [
             {"choices": [{"delta": {"content": "```json\\n{\\\"schema\\\": \\\"luvira.devflow.implementation-artifact.v1\\\"}\\n```"}}]},
