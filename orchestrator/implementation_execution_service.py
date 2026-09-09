@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Callable, Protocol
 
 from execution_platform import ExecutionPlatform, V3Status
@@ -15,6 +16,7 @@ class ImplementationTaskReader(Protocol):
 
 class ImplementationTransaction(Protocol):
     def claim_implementation(self, task, record) -> None: ...
+    def record_implementation_progress(self, task, record) -> None: ...
     def record_result(self, task, record, expected_status: V3Status) -> None: ...
 
 
@@ -82,8 +84,22 @@ class ImplementationExecutionService:
                 self._fail(task, record, "IMPLEMENTATION_SOURCE_UNAVAILABLE_FINAL", outcomes)
                 continue
             try:
+                def progress(stream_events: int) -> None:
+                    # Only status metadata is durable; source and model text
+                    # must never enter the control plane.
+                    record.stream_events = stream_events
+                    record.last_progress_at = datetime.now(timezone.utc).isoformat()
+                    try:
+                        self._transaction.record_implementation_progress(task, record)
+                    except Exception:
+                        # The provider claim remains durable.  Do not turn a
+                        # transient heartbeat write failure into a duplicate
+                        # provider request.
+                        pass
+
                 payload = self._client.generate_artifact(
                     model=self._model, envelope=envelope, source_snapshot=source,
+                    on_progress=progress,
                 )
                 self._handoff.receive_from_broker(record.execution_id, envelope, payload)
             except OpenCodeImplementationError as exc:
