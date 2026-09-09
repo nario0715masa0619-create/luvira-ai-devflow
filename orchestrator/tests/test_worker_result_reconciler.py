@@ -3,6 +3,7 @@ import json
 import unittest
 
 from artifact_handoff import ArtifactHandoff, InMemoryVerifiedArtifactStore
+from cloud_run_bootstrap_client import CloudRunBootstrapClientError
 from execution_platform import ExecutionRecord, TaskSpec, V3Status, V3Task
 from execution_result_adapter import RESULT_PREFIX
 from worker_result_reconciler import WorkerResultReconciler
@@ -77,3 +78,17 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         self.assertEqual(reconciler.sweep(), [("task", "worker_bootstrap_artifact_missing_or_ambiguous", "execution")])
         self.assertEqual(task.execution.failure_code, "worker_bootstrap_artifact_missing_or_ambiguous")
         self.assertEqual(writes, [(V3Status.EXECUTION_FAILED_FINAL, V3Status.EXECUTION_FAILED_FINAL)])
+
+    def test_legacy_ambiguous_worker_launch_is_safely_retried(self):
+        task = running_task()
+        task.execution.external_operation_id = None
+        writes = []
+        tasks = type("Tasks", (), {"running": lambda _: [task]})()
+        transaction = type("Tx", (), {"record_external_operation": lambda *_: None, "record_result": lambda *_: writes.append(task.status)})()
+        worker = type("Worker", (), {"find_execution_for_task": lambda *_: (_ for _ in ()).throw(CloudRunBootstrapClientError("cloud_run_execution_ambiguous"))})()
+        logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
+        reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))
+
+        self.assertEqual(reconciler.sweep(), [("task", "WORKER_DISPATCH_RETRYABLE", "execution")])
+        self.assertEqual(task.status, V3Status.EXECUTION_FAILED_RETRYABLE)
+        self.assertEqual(writes, [V3Status.EXECUTION_FAILED_RETRYABLE])
