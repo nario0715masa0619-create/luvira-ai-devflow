@@ -216,4 +216,11 @@ class OpenCodeImplementationClient:
             # SSE comments and metadata intentionally carry no model content.
         if consume_event():
             return "".join(fragments)
+        # Some OpenAI-compatible SSE relays close the connection after the
+        # final content frame without sending a separate ``[DONE]`` frame.
+        # Once content has arrived, EOF is an alternate terminal framing, not
+        # evidence that the completed artifact is invalid.  JSON decoding and
+        # verifier validation still reject an incomplete artifact below.
+        if fragments:
+            return "".join(fragments)
         raise ValueError("stream_ended_before_done")
