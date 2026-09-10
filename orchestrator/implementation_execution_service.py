@@ -8,6 +8,7 @@ from typing import Callable, Protocol
 from execution_platform import ExecutionPlatform, V3Status
 from implementation_artifact_handoff import ImplementationArtifactHandoff, ImplementationArtifactHandoffError
 from opencode_implementation_client import OpenCodeImplementationError
+from source_snapshot import SourceSnapshot
 
 
 class ImplementationTaskReader(Protocol):
@@ -97,11 +98,16 @@ class ImplementationExecutionService:
                         # provider request.
                         pass
 
+                source_content = source.content if isinstance(source, SourceSnapshot) else source
+                baseline_paths = source.paths if isinstance(source, SourceSnapshot) else None
                 payload = self._client.generate_artifact(
-                    model=self._model, envelope=envelope, source_snapshot=source,
+                    model=self._model, envelope=envelope, source_snapshot=source_content,
                     on_progress=progress,
                 )
-                self._handoff.receive_from_broker(record.execution_id, envelope, payload)
+                self._handoff.receive_from_broker(
+                    record.execution_id, envelope, payload,
+                    baseline_paths=baseline_paths,
+                )
             except OpenCodeImplementationError as exc:
                 self._fail(task, record, exc.code, outcomes)
                 continue

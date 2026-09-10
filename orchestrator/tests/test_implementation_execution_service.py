@@ -78,7 +78,7 @@ class ImplementationExecutionServiceTest(unittest.TestCase):
         })()
         client = type("Client", (), {"generate_artifact": lambda *_args, **_kwargs: b"{}"})()
         handoff = type("Handoff", (), {
-            "receive_from_broker": lambda *_: (_ for _ in ()).throw(
+            "receive_from_broker": lambda *_, **__: (_ for _ in ()).throw(
                 ImplementationArtifactHandoffError("artifact_schema_mismatch")
             )
         })()
