@@ -180,7 +180,14 @@ class OpenCodeImplementationClient:
                 return False
             if not isinstance(delta, dict):
                 raise ValueError("stream_event_invalid")
+            # OpenAI-compatible streams commonly end with a final delta whose
+            # ``content`` is null and whose ``finish_reason`` is set on the
+            # surrounding choice.  It carries no artifact text; rejecting it
+            # after a long, otherwise valid stream turns a completed provider
+            # response into a false terminal protocol failure.
             content = delta.get("content", "")
+            if content is None:
+                return False
             if not isinstance(content, str):
                 raise ValueError("stream_content_invalid")
             fragments.append(content)
