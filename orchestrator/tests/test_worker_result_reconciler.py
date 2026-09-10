@@ -6,6 +6,7 @@ from artifact_handoff import ArtifactHandoff, InMemoryVerifiedArtifactStore
 from cloud_run_bootstrap_client import CloudRunBootstrapClientError
 from execution_platform import ExecutionRecord, TaskSpec, V3Status, V3Task
 from execution_result_adapter import RESULT_PREFIX
+from v3_transaction import V3TransactionError
 from worker_result_reconciler import WorkerResultReconciler
 
 
