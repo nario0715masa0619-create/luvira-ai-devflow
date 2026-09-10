@@ -7,7 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Iterable
 
 MAX_ARTIFACT_BYTES = 512 * 1024
 MAX_DIFF_BYTES = 384 * 1024
@@ -66,7 +66,7 @@ def _decode(value: bytes) -> dict[str, Any]:
     return artifact
 
 
-def _diff_paths(diff: bytes) -> tuple[str, ...]:
+def _diff_files(diff: bytes) -> tuple[tuple[str | None, str | None], ...]:
     if not diff or len(diff) > MAX_DIFF_BYTES or b"\0" in diff:
         raise ImplementationArtifactError("artifact_diff_invalid")
     try:
@@ -75,7 +75,8 @@ def _diff_paths(diff: bytes) -> tuple[str, ...]:
         raise ImplementationArtifactError("artifact_diff_not_utf8") from exc
     if any(marker in text for marker in SECRET_MARKERS):
         raise ImplementationArtifactError("artifact_secret_detected")
-    old, new, paths = None, None, []
+    old, new, files = None, None, []
+    have_old, have_new = False, False
     for line in text.splitlines():
         match = PATH_LINE.match(line)
         if not match:
@@ -83,21 +84,52 @@ def _diff_paths(diff: bytes) -> tuple[str, ...]:
         side, raw = match.groups()
         candidate = None if raw == "/dev/null" else _path(raw)
         if side == "---":
-            if old is not None or new is not None:
+            if have_old or have_new:
                 raise ImplementationArtifactError("artifact_diff_header_invalid")
             old = candidate
+            have_old = True
         else:
-            if old is None or new is not None:
+            if not have_old or have_new:
                 raise ImplementationArtifactError("artifact_diff_header_invalid")
             new = candidate
-            paths.append(new or old)
-            old, new = None, None
-    if old is not None or new is not None or not paths:
+            have_new = True
+            files.append((old, new))
+            old, new, have_old, have_new = None, None, False, False
+    if have_old or have_new or not files:
         raise ImplementationArtifactError("artifact_diff_header_invalid")
-    return tuple(sorted(set(paths)))
+    if any(old_path is None and new_path is None for old_path, new_path in files):
+        raise ImplementationArtifactError("artifact_diff_header_invalid")
+    return tuple(files)
 
 
-def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any]) -> VerifiedImplementationArtifact:
+def _validate_baseline(files: tuple[tuple[str | None, str | None], ...],
+                       baseline_paths: Iterable[str] | None) -> None:
+    """Require diff headers to describe the immutable source snapshot.
+
+    The publication adapter can safely apply a patch only when its header
+    declares whether the base contains the file.  Without this check a model
+    can label a new file as ``a/path`` and pass structural validation, only to
+    fail after reaching the GitHub write boundary.
+    """
+    if baseline_paths is None:
+        return
+    try:
+        baseline = {_path(path) for path in baseline_paths}
+    except TypeError as exc:
+        raise ImplementationArtifactError("artifact_baseline_invalid") from exc
+    for old_path, new_path in files:
+        if old_path is not None and old_path not in baseline:
+            raise ImplementationArtifactError("artifact_diff_base_mismatch")
+        if old_path is None and new_path in baseline:
+            raise ImplementationArtifactError("artifact_diff_base_mismatch")
+        # The publisher supports create, modify, and delete.  A rename needs
+        # an explicit atomic Git operation, so reject it before publication.
+        if old_path is not None and new_path is not None and old_path != new_path:
+            raise ImplementationArtifactError("artifact_rename_unsupported")
+
+
+def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any], *,
+                                   baseline_paths: Iterable[str] | None = None) -> VerifiedImplementationArtifact:
     """Validate an AI result against the immutable Worker envelope."""
     artifact = _decode(payload)
     if artifact["schema"] != SCHEMA or artifact["publication"] != "verification-only":
@@ -109,7 +141,9 @@ def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any]) -> 
         diff = base64.b64decode(artifact["diff_b64"], validate=True)
     except (TypeError, ValueError) as exc:
         raise ImplementationArtifactError("artifact_diff_encoding_invalid") from exc
-    paths = _diff_paths(diff)
+    files = _diff_files(diff)
+    _validate_baseline(files, baseline_paths)
+    paths = tuple(sorted({new_path or old_path for old_path, new_path in files if new_path or old_path}))
     declared = artifact["changed_paths"]
     if not isinstance(declared, list) or tuple(sorted({_path(item) for item in declared})) != paths:
         raise ImplementationArtifactError("artifact_changed_paths_mismatch")

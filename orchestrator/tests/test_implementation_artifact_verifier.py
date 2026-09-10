@@ -42,3 +42,21 @@ class ImplementationArtifactVerifierTest(unittest.TestCase):
     def test_rejects_declared_paths_that_differ_from_the_diff(self):
         with self.assertRaisesRegex(ImplementationArtifactError, "changed_paths_mismatch"):
             verify_implementation_artifact(payload(changed_paths=["src/other.py"]), ENVELOPE)
+
+    def test_rejects_new_file_masquerading_as_an_existing_base_file(self):
+        new_file = b"--- a/src/new.py\n+++ b/src/new.py\n@@ -0,0 +1 @@\n+created\n"
+        with self.assertRaisesRegex(ImplementationArtifactError, "diff_base_mismatch"):
+            verify_implementation_artifact(
+                payload(diff_b64=base64.b64encode(new_file).decode(), changed_paths=["src/new.py"]),
+                ENVELOPE,
+                baseline_paths=("src/existing.py",),
+            )
+
+    def test_accepts_a_new_file_only_with_dev_null_header(self):
+        new_file = b"--- /dev/null\n+++ b/src/new.py\n@@ -0,0 +1 @@\n+created\n"
+        result = verify_implementation_artifact(
+            payload(diff_b64=base64.b64encode(new_file).decode(), changed_paths=["src/new.py"]),
+            ENVELOPE,
+            baseline_paths=("src/existing.py",),
+        )
+        self.assertEqual(result.changed_paths, ("src/new.py",))
