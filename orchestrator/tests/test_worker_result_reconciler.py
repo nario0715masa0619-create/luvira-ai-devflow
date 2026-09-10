@@ -17,8 +17,8 @@ def running_task():
         "budget": {"max_cost_usd": 1}, "expiry": "2026-12-01T00:00:00Z",
         "execution_scope": {"allowed_paths": ["src/"]}, "model_policy": "low-cost",
     })
-    record = ExecutionRecord("execution", "task", spec.hash, 1, V3Status.EXECUTION_RUNNING, external_operation_id="run-123")
-    return V3Task("task", spec, V3Status.EXECUTION_RUNNING, execution=record)
+    record = ExecutionRecord("execution", "task", spec.hash, 1, V3Status.WORKER_LAUNCH_ACCEPTED, external_operation_id="run-123", launch_operation_id="operations/123")
+    return V3Task("task", spec, V3Status.WORKER_LAUNCH_ACCEPTED, execution=record)
 
 
 def artifact_line(task):

@@ -32,6 +32,7 @@ class WorkerDispatchServiceTest(unittest.TestCase):
         self.assertEqual(calls[1][0], "start")
         self.assertEqual(calls[2], ("launch", "operations/123"))
         self.assertEqual(task.execution.launch_operation_id, "operations/123")
+        self.assertEqual(task.status, V3Status.WORKER_LAUNCH_ACCEPTED)
         self.assertIsNone(task.execution.external_operation_id)
 
     def test_start_failure_does_not_requeue_or_duplicate_work(self):
@@ -42,5 +43,5 @@ class WorkerDispatchServiceTest(unittest.TestCase):
 
         with self.assertRaisesRegex(WorkerDispatcherError, "outcome_unknown"):
             service.dispatch("task", "execution")
-        self.assertEqual(task.status, V3Status.WORKER_LAUNCH_ACCEPTED)
+        self.assertEqual(task.status, V3Status.EXECUTION_RUNNING)
         self.assertIsNone(task.execution.external_operation_id)
