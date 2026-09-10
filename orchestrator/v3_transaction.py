@@ -173,7 +173,8 @@ class V3Transaction:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
             if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.WORKER_EXECUTION_IDENTIFIED,
-                                      V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED}
+                                      V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED,
+                                      V3Status.ARTIFACT_VERIFIED}
                     or stored.execution is None
                     or stored.execution.execution_id != record.execution_id
                     or stored.execution.external_operation_id != record.external_operation_id

@@ -7,6 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from urllib.parse import quote
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -123,6 +124,8 @@ class GitHubVerifiedPublisher:
         try:
             with self._opener(request, timeout=20) as response:
                 payload = response.read()
+        except HTTPError as exc:
+            raise VerifiedPublicationError(f"publication_github_http_{exc.code}") from exc
         except Exception as exc:
             raise VerifiedPublicationError("publication_github_unavailable") from exc
         if not payload:
@@ -146,7 +149,12 @@ class GitHubVerifiedPublisher:
             source = b""
             sha = None
             if patch.old_path is not None:
-                current = self._call("GET", f"/repos/{repo}/contents/{quote(patch.old_path, safe='/')}?ref={quote(base_commit, safe='')}")
+                try:
+                    current = self._call("GET", f"/repos/{repo}/contents/{quote(patch.old_path, safe='/')}?ref={quote(base_commit, safe='')}")
+                except VerifiedPublicationError as exc:
+                    if str(exc) == "publication_github_http_404":
+                        raise VerifiedPublicationError("publication_base_content_missing") from exc
+                    raise
                 try:
                     source = base64.b64decode(current["content"], validate=True); sha = current["sha"]
                 except (KeyError, TypeError, ValueError) as exc:
