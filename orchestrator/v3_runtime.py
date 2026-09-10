@@ -24,6 +24,7 @@ from implementation_execution_service import ImplementationExecutionService
 from opencode_implementation_client import OpenCodeImplementationClient
 from github_verified_publisher import GitHubVerifiedPublisher
 from verified_publication_service import VerifiedPublicationService
+from publication_completion_service import PublicationCompletionService
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class V3QueueRuntime:
     reconciler: WorkerResultReconciler
     implementation: ImplementationExecutionService
     publication: VerifiedPublicationService
+    completion: PublicationCompletionService
 
 
 def create_v3_queue_service(
@@ -138,4 +140,8 @@ def create_v3_queue_service(
         tasks, transaction, implementation_store,
         lambda task: GitHubVerifiedPublisher(task.spec.repository, source_token_for_repository(task.spec.repository)),
     )
-    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication)
+    completion = PublicationCompletionService(
+        tasks, transaction,
+        lambda task: GitHubVerifiedPublisher(task.spec.repository, source_token_for_repository(task.spec.repository)),
+    )
+    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication, completion)

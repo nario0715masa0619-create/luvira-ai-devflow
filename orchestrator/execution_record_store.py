@@ -49,6 +49,7 @@ def record_from_payload(value: dict[str, Any]) -> ExecutionRecord:
             failure_code=value.get("failure_code"),
             stream_events=value.get("stream_events", 0),
             last_progress_at=value.get("last_progress_at"),
+            publication_url=value.get("publication_url"),
             revision=value.get("revision", 1),
         )
     except (KeyError, TypeError, ValueError) as exc:

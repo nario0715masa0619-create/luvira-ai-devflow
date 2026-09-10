@@ -31,6 +31,7 @@ def task_payload(task: V3Task) -> dict[str, Any]:
             "failure_code": task.execution.failure_code,
             "stream_events": task.execution.stream_events,
             "last_progress_at": task.execution.last_progress_at,
+            "publication_url": task.execution.publication_url,
             "revision": task.execution.revision,
         }
     return payload
@@ -48,6 +49,7 @@ def task_from_payload(value: dict[str, Any]) -> V3Task:
             failure_code=execution_value.get("failure_code"),
             stream_events=execution_value.get("stream_events", 0),
             last_progress_at=execution_value.get("last_progress_at"),
+            publication_url=execution_value.get("publication_url"),
             revision=execution_value.get("revision", 1),
         )
         task = V3Task(task_id=value["task_id"], spec=TaskSpec.from_dict(value["spec"]),
@@ -127,6 +129,9 @@ class FirestoreV3TaskStore:
 
     def artifact_verified(self):
         return self._with_status(V3Status.ARTIFACT_VERIFIED.value)
+
+    def published(self):
+        return self._with_status(V3Status.PUBLISHED.value)
 
     def _with_status(self, status):
         """Yield valid records without allowing one stale record to stop the queue.

@@ -55,7 +55,7 @@ class VerifiedPublicationService:
                     base_commit=artifact.base_commit, diff=artifact.diff,
                     title=title, body=body,
                 )
-                ExecutionPlatform.publish_existing(task, record.execution_id)
+                ExecutionPlatform.publish_existing(task, record.execution_id, url)
                 self._transaction.record_publication(task, record)
                 outcomes.append((task.task_id, "PUBLISHED", url))
             except VerifiedPublicationError as exc:
