@@ -46,6 +46,7 @@ class V3Status(str, Enum):
     REVIEWING = "REVIEWING"
     READY_TO_PUBLISH = "READY_TO_PUBLISH"
     PUBLISHED = "PUBLISHED"
+    MERGED = "MERGED"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
@@ -156,6 +157,7 @@ class ExecutionRecord:
     failure_code: str | None = None
     stream_events: int = 0
     last_progress_at: str | None = None
+    publication_url: str | None = None
     revision: int = 1
 
 
@@ -383,14 +385,28 @@ class ExecutionPlatform:
         return ExecutionPlatform.fail_existing(task, execution_id, code)
 
     @staticmethod
-    def publish_existing(task: V3Task, execution_id: str) -> V3Task:
+    def publish_existing(task: V3Task, execution_id: str, publication_url: str) -> V3Task:
         if task.status is not V3Status.ARTIFACT_VERIFIED:
             raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if task.execution is None or task.execution.execution_id != execution_id:
             raise TransitionRejected("execution_identity_mismatch")
+        if not isinstance(publication_url, str) or not publication_url.startswith("https://github.com/"):
+            raise TransitionRejected("publication_url_invalid")
+        task.execution.publication_url = publication_url
         task.execution.status = V3Status.PUBLISHED
         task.status = V3Status.PUBLISHED
         task.audit.append("PUBLISHED")
+        return task
+
+    @staticmethod
+    def merge_existing(task: V3Task, execution_id: str) -> V3Task:
+        if task.status is not V3Status.PUBLISHED:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        task.execution.status = V3Status.MERGED
+        task.status = V3Status.MERGED
+        task.audit.append("MERGED")
         return task
 
     def _task(self, task_id: str, *statuses: V3Status) -> V3Task:

@@ -254,6 +254,28 @@ class V3Transaction:
         self._run_transaction(write)
         task.revision += 1
 
+    def record_merge(self, task: V3Task, record: ExecutionRecord) -> None:
+        if task.status is not V3Status.MERGED or task.execution is not record:
+            raise V3TransactionError("merge_result_invalid")
+        task_ref = self.tasks.document(task.task_id)
+        def write(transaction: Any) -> None:
+            snapshot = task_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(snapshot.to_dict())
+            if (stored.status is not V3Status.PUBLISHED or stored.execution is None
+                    or stored.execution.execution_id != record.execution_id
+                    # Older published records predate URL persistence.  The
+                    # reconciler may fill that missing metadata only while it
+                    # atomically records the already-confirmed merge.
+                    or stored.execution.publication_url not in {None, record.publication_url}
+                    or stored.revision != task.revision):
+                raise V3TransactionError("merge_not_recordable")
+            payload = task_payload(task); payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
+        self._run_transaction(write)
+        task.revision += 1
+
     def _run_transaction(self, write: Callable[[Any], None]) -> None:
         transaction = self.client.transaction()
         # The client hook keeps this adapter unit-testable. Production Firestore

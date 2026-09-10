@@ -130,3 +130,12 @@ class ExecutionPlatformTest(unittest.TestCase):
         ExecutionPlatform.fail_existing(task, execution.execution_id, "PUBLICATION_BASE_CONTENT_MISSING_FINAL")
 
         self.assertEqual(task.status, V3Status.EXECUTION_FAILED_FINAL)
+
+    def test_published_execution_reaches_merged_only_with_its_verified_pr_url(self):
+        platform, task = self.authorized()
+        execution = platform.queue(task.task_id, [True])
+        ExecutionPlatform.begin_existing(task, execution.execution_id)
+        execution.status = task.status = V3Status.ARTIFACT_VERIFIED
+        ExecutionPlatform.publish_existing(task, execution.execution_id, "https://github.com/a/b/pull/1")
+        ExecutionPlatform.merge_existing(task, execution.execution_id)
+        self.assertEqual(task.status, V3Status.MERGED)

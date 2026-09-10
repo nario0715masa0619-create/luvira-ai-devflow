@@ -118,7 +118,7 @@ class GitHubVerifiedPublisher:
             raise VerifiedPublicationError("publication_config_invalid")
         self.repository, self._token, self._opener = repository, token, opener
 
-    def _call(self, method: str, path: str, body=None):
+    def _call(self, method: str, path: str, body=None, *, list_response: bool = False):
         data = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         request = Request(API + path, data=data, method=method, headers={
             "Authorization": f"Bearer {self._token}", "Accept": "application/vnd.github+json",
@@ -137,6 +137,10 @@ class GitHubVerifiedPublisher:
             value = json.loads(payload.decode())
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise VerifiedPublicationError("publication_github_response_invalid") from exc
+        if list_response:
+            if not isinstance(value, list):
+                raise VerifiedPublicationError("publication_github_response_invalid")
+            return value
         if not isinstance(value, dict):
             raise VerifiedPublicationError("publication_github_response_invalid")
         return value
@@ -180,5 +184,35 @@ class GitHubVerifiedPublisher:
         pull = self._call("POST", f"/repos/{repo}/pulls", {"title": title, "head": branch, "base": "main", "body": body, "draft": False})
         url = pull.get("html_url")
         if not isinstance(url, str) or not url:
+            raise VerifiedPublicationError("publication_pull_invalid")
+        return url
+
+    def pull_state(self, publication_url: str) -> str:
+        """Read a PR terminal state without accepting a caller-controlled repo."""
+        prefix = f"https://github.com/{self.repository}/pull/"
+        number = publication_url.removeprefix(prefix)
+        if not number.isdigit() or str(int(number)) != number:
+            raise VerifiedPublicationError("publication_url_invalid")
+        value = self._call("GET", f"/repos/{quote(self.repository, safe='/')}/pulls/{number}")
+        if value.get("merged_at"):
+            return "MERGED"
+        if value.get("state") == "closed":
+            return "CLOSED"
+        if value.get("state") == "open":
+            return "OPEN"
+        raise VerifiedPublicationError("publication_pull_state_invalid")
+
+    def publication_url_for(self, task_id: str, execution_id: str) -> str:
+        """Recover the one deterministic PR created by older durable records."""
+        branch = f"luvira/{task_id[:32]}-{execution_id[:12]}"
+        owner = self.repository.split("/", 1)[0]
+        pulls = self._call(
+            "GET", f"/repos/{quote(self.repository, safe='/')}/pulls?state=all&head={quote(owner + ':' + branch, safe='')}",
+            list_response=True,
+        )
+        if len(pulls) != 1 or not isinstance(pulls[0], dict):
+            raise VerifiedPublicationError("publication_pull_not_unique")
+        url = pulls[0].get("html_url")
+        if not isinstance(url, str) or not url.startswith(f"https://github.com/{self.repository}/pull/"):
             raise VerifiedPublicationError("publication_pull_invalid")
         return url
