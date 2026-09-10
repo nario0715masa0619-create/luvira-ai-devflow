@@ -271,6 +271,7 @@ class ExecutionPlatform:
                 V3Status.EXECUTION_RUNNING,
                 V3Status.WORKER_EXECUTION_IDENTIFIED,
                 V3Status.IMPLEMENTATION_GENERATING,
+                V3Status.ARTIFACT_VERIFIED,
         }:
             raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if task.execution is None or task.execution.execution_id != execution_id:

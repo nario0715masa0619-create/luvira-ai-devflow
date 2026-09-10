@@ -120,3 +120,13 @@ class ExecutionPlatformTest(unittest.TestCase):
 
         with self.assertRaisesRegex(TransitionRejected, "invalid_transition"):
             ExecutionPlatform.fail_existing(task, execution.execution_id, "WORKER_TIMEOUT_RETRYABLE")
+
+    def test_invalid_verified_artifact_can_be_recorded_as_final(self):
+        platform, task = self.authorized()
+        execution = platform.queue(task.task_id, [True])
+        ExecutionPlatform.begin_existing(task, execution.execution_id)
+        execution.status = task.status = V3Status.ARTIFACT_VERIFIED
+
+        ExecutionPlatform.fail_existing(task, execution.execution_id, "PUBLICATION_BASE_CONTENT_MISSING_FINAL")
+
+        self.assertEqual(task.status, V3Status.EXECUTION_FAILED_FINAL)
