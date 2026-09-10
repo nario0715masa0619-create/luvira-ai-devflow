@@ -104,8 +104,22 @@ class ImplementationArtifactVerifierTest(unittest.TestCase):
         self.assertEqual(result.diff, DIFF)
         self.assertEqual(result.changed_paths, ("src/example.py",))
 
-    def test_rejects_unsorted_or_unchanged_full_file_entries(self):
-        with self.assertRaisesRegex(ImplementationArtifactError, "unchanged"):
+    def test_derives_changed_paths_and_discards_unchanged_candidate_files(self):
+        result = verify_implementation_artifact(
+            model_payload(
+                files=[
+                    {"path": "src/example.py", "content": "old\n"},
+                    {"path": "src/other.py", "content": "created\n"},
+                ],
+                changed_paths=["src/example.py", "src/other.py"],
+            ), ENVELOPE,
+            baseline_paths=("src/example.py",), baseline_files=(("src/example.py", b"old\n"),),
+        )
+        self.assertEqual(result.changed_paths, ("src/other.py",))
+        self.assertTrue(result.diff.startswith(b"--- /dev/null\n+++ b/src/other.py\n"))
+
+    def test_rejects_full_file_artifact_with_no_effective_change(self):
+        with self.assertRaisesRegex(ImplementationArtifactError, "no_effect"):
             verify_implementation_artifact(
                 model_payload(files=[{"path": "src/example.py", "content": "old\n"}]), ENVELOPE,
                 baseline_files=(("src/example.py", b"old\n"),),

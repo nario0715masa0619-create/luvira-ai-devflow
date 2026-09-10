@@ -55,7 +55,7 @@ def _prompt(envelope: dict[str, Any], source: str) -> str:
         "artifact_rules": [
             "Return a JSON object with exactly the contract.required_fields plus schema and publication; do not omit or add fields.",
             "files must be a non-empty JSON array of {path,content}; content is the complete UTF-8 replacement text for that changed file and must end with a newline. Never return a diff or base64.",
-            "files and changed_paths must use the same sorted unique paths, and every path must be within allowed_paths.",
+            "files must use sorted unique paths. changed_paths may name a sorted subset of those candidate files; the Broker derives the final changed paths from the immutable source comparison. Every path must be within allowed_paths.",
             "tests must be an array of {name,status}; status is only passed or skipped. Leave it empty unless a result is actually available; GitHub CI is the merge gate.",
             "Do not change protected paths, include secrets, use /dev/null paths, or include prose outside the JSON object.",
         ],

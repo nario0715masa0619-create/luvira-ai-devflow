@@ -110,8 +110,12 @@ def _deterministic_diff(artifact: dict[str, Any], baseline_files: Iterable[tuple
             original_text = [] if original is None else original.decode("utf-8").splitlines(keepends=True)
         except UnicodeDecodeError as exc:
             raise ImplementationArtifactError("artifact_file_content_invalid") from exc
+        # A model can include an inspected file whose replacement text is
+        # identical to the immutable base.  It is not a publishable change;
+        # discard it instead of letting harmless candidate metadata reject
+        # the independently verified changes in the same artifact.
         if original == target:
-            raise ImplementationArtifactError("artifact_file_unchanged")
+            continue
         before = "/dev/null" if original is None else f"a/{path}"
         after = f"b/{path}"
         rendered.extend(difflib.unified_diff(
@@ -121,8 +125,16 @@ def _deterministic_diff(artifact: dict[str, Any], baseline_files: Iterable[tuple
     if paths != sorted(paths):
         raise ImplementationArtifactError("artifact_files_not_sorted")
     declared = artifact.get("changed_paths")
-    if not isinstance(declared, list) or tuple(sorted({_path(item) for item in declared})) != tuple(paths):
+    if not isinstance(declared, list):
         raise ImplementationArtifactError("artifact_changed_paths_mismatch")
+    try:
+        declared_paths = tuple(_path(item) for item in declared)
+    except (TypeError, ValueError) as exc:
+        raise ImplementationArtifactError("artifact_changed_paths_mismatch") from exc
+    if declared_paths != tuple(sorted(set(declared_paths))) or not set(declared_paths).issubset(paths):
+        raise ImplementationArtifactError("artifact_changed_paths_mismatch")
+    if not rendered:
+        raise ImplementationArtifactError("artifact_no_effect")
     return "".join(rendered).encode("utf-8")
 
 
@@ -295,9 +307,10 @@ def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any], *,
     _validate_baseline(files, baseline_paths)
     _validate_exact_apply(diff, baseline_files)
     paths = tuple(sorted({new_path or old_path for old_path, new_path in files if new_path or old_path}))
-    declared = artifact["changed_paths"]
-    if not isinstance(declared, list) or tuple(sorted({_path(item) for item in declared})) != paths:
-        raise ImplementationArtifactError("artifact_changed_paths_mismatch")
+    if artifact["schema"] != MODEL_SCHEMA:
+        declared = artifact["changed_paths"]
+        if not isinstance(declared, list) or tuple(sorted({_path(item) for item in declared})) != paths:
+            raise ImplementationArtifactError("artifact_changed_paths_mismatch")
     allowed = envelope.get("allowed_paths")
     if not isinstance(allowed, (list, tuple)) or not allowed:
         raise ImplementationArtifactError("envelope_scope_invalid")
