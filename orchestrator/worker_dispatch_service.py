@@ -24,11 +24,11 @@ class TaskReader(Protocol):
 
 class ExecutionTransaction(Protocol):
     def begin_queued(self, task: V3Task, record: ExecutionRecord) -> None: ...
-    def record_external_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
+    def record_launch_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
 
 
 class WorkerStarter(Protocol):
-    def start(self, envelope: dict) -> str: ...
+    def start_operation(self, envelope: dict) -> str: ...
 
 
 class WorkerDispatchService:
@@ -45,14 +45,15 @@ class WorkerDispatchService:
         self._transaction.begin_queued(task, record)
         envelope = from_running_task(task)
         try:
-            external_execution_id = self._worker.start(envelope)
+            launch_operation_id = self._worker.start_operation(envelope)
         except Exception as exc:
             # The RUNNING claim is deliberately retained.  A later reconciler
             # must determine whether Cloud Run accepted the request before any
             # retry can spend work twice.
             raise WorkerDispatcherError("worker_start_outcome_unknown") from exc
-        if not isinstance(external_execution_id, str) or not external_execution_id:
+        if not isinstance(launch_operation_id, str) or not launch_operation_id:
             raise WorkerDispatcherError("worker_start_invalid")
-        record.external_operation_id = external_execution_id
-        self._transaction.record_external_operation(task, record)
-        return external_execution_id
+        record.launch_operation_id = launch_operation_id
+        ExecutionPlatform.accept_worker_launch_existing(task, execution_id)
+        self._transaction.record_launch_operation(task, record)
+        return launch_operation_id

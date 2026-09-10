@@ -7,7 +7,9 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Any, Iterable
+
+from github_verified_publisher import VerifiedPublicationError, apply_patch, parse_verified_diff
 
 MAX_ARTIFACT_BYTES = 512 * 1024
 MAX_DIFF_BYTES = 384 * 1024
@@ -17,6 +19,7 @@ PROTECTED_PREFIXES = (".git/", ".github/", "security/", "infra/", "terraform/")
 FORBIDDEN_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".pyc", ".pyo")
 SECRET_MARKERS = ("-----BEGIN ", "AKIA", "AIza", "ghp_", "github_pat_", "xoxb-")
 PATH_LINE = re.compile(r"^(---|\+\+\+) (?:a/|b/)?(.+?)(?:\t.*)?$")
+HUNK_LINE = re.compile(r"^@@ -0(?:,0)? \+\d+(?:,\d+)? @@")
 
 
 class ImplementationArtifactError(ValueError):
@@ -66,7 +69,7 @@ def _decode(value: bytes) -> dict[str, Any]:
     return artifact
 
 
-def _diff_paths(diff: bytes) -> tuple[str, ...]:
+def _diff_files(diff: bytes) -> tuple[tuple[str | None, str | None], ...]:
     if not diff or len(diff) > MAX_DIFF_BYTES or b"\0" in diff:
         raise ImplementationArtifactError("artifact_diff_invalid")
     try:
@@ -75,7 +78,8 @@ def _diff_paths(diff: bytes) -> tuple[str, ...]:
         raise ImplementationArtifactError("artifact_diff_not_utf8") from exc
     if any(marker in text for marker in SECRET_MARKERS):
         raise ImplementationArtifactError("artifact_secret_detected")
-    old, new, paths = None, None, []
+    old, new, files = None, None, []
+    have_old, have_new = False, False
     for line in text.splitlines():
         match = PATH_LINE.match(line)
         if not match:
@@ -83,21 +87,138 @@ def _diff_paths(diff: bytes) -> tuple[str, ...]:
         side, raw = match.groups()
         candidate = None if raw == "/dev/null" else _path(raw)
         if side == "---":
-            if old is not None or new is not None:
+            if have_old or have_new:
                 raise ImplementationArtifactError("artifact_diff_header_invalid")
             old = candidate
+            have_old = True
         else:
-            if old is None or new is not None:
+            if not have_old or have_new:
                 raise ImplementationArtifactError("artifact_diff_header_invalid")
             new = candidate
-            paths.append(new or old)
-            old, new = None, None
-    if old is not None or new is not None or not paths:
+            have_new = True
+            files.append((old, new))
+            old, new, have_old, have_new = None, None, False, False
+    if have_old or have_new or not files:
         raise ImplementationArtifactError("artifact_diff_header_invalid")
-    return tuple(sorted(set(paths)))
+    if any(old_path is None and new_path is None for old_path, new_path in files):
+        raise ImplementationArtifactError("artifact_diff_header_invalid")
+    return tuple(files)
 
 
-def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any]) -> VerifiedImplementationArtifact:
+def _validate_baseline(files: tuple[tuple[str | None, str | None], ...],
+                       baseline_paths: Iterable[str] | None) -> None:
+    """Require diff headers to describe the immutable source snapshot.
+
+    The publication adapter can safely apply a patch only when its header
+    declares whether the base contains the file.  Without this check a model
+    can label a new file as ``a/path`` and pass structural validation, only to
+    fail after reaching the GitHub write boundary.
+    """
+    if baseline_paths is None:
+        return
+    try:
+        baseline = {_path(path) for path in baseline_paths}
+    except TypeError as exc:
+        raise ImplementationArtifactError("artifact_baseline_invalid") from exc
+    for old_path, new_path in files:
+        if old_path is not None and old_path not in baseline:
+            raise ImplementationArtifactError("artifact_diff_base_mismatch")
+        if old_path is None and new_path in baseline:
+            raise ImplementationArtifactError("artifact_diff_base_mismatch")
+        # The publisher supports create, modify, and delete.  A rename needs
+        # an explicit atomic Git operation, so reject it before publication.
+        if old_path is not None and new_path is not None and old_path != new_path:
+            raise ImplementationArtifactError("artifact_rename_unsupported")
+
+
+def _canonicalize_unambiguous_creates(diff: bytes, baseline_paths: Iterable[str] | None) -> bytes:
+    """Normalize only a provable new-file header emitted in existing-file form.
+
+    Providers sometimes emit ``a/path`` / ``b/path`` for a creation even
+    though the hunk is exclusively ``-0,0`` plus-lines.  That is an encoding
+    error, not a content change.  We repair that one syntax defect before the
+    immutable-artifact boundary.  Every ambiguous mismatch remains rejected.
+    """
+    if baseline_paths is None:
+        return diff
+    try:
+        baseline = {_path(path) for path in baseline_paths}
+        lines = diff.decode("utf-8").splitlines(keepends=True)
+    except (TypeError, UnicodeDecodeError) as exc:
+        raise ImplementationArtifactError("artifact_baseline_invalid") from exc
+    result = list(lines)
+    index = 0
+    while index < len(lines):
+        old_match = PATH_LINE.match(lines[index].rstrip("\r\n"))
+        if not old_match or old_match.group(1) != "---":
+            index += 1
+            continue
+        if index + 1 >= len(lines):
+            break
+        new_match = PATH_LINE.match(lines[index + 1].rstrip("\r\n"))
+        if not new_match or new_match.group(1) != "+++":
+            index += 1
+            continue
+        old_raw, new_raw = old_match.group(2), new_match.group(2)
+        old_path = None if old_raw == "/dev/null" else _path(old_raw)
+        new_path = None if new_raw == "/dev/null" else _path(new_raw)
+        next_header = index + 2
+        while next_header < len(lines):
+            candidate = PATH_LINE.match(lines[next_header].rstrip("\r\n"))
+            if candidate and candidate.group(1) == "---":
+                break
+            next_header += 1
+        section = [line.rstrip("\r\n") for line in lines[index + 2:next_header]]
+        hunk_positions = [position for position, line in enumerate(section) if line.startswith("@@ ")]
+        is_creation = (
+            old_path is not None and new_path == old_path and old_path not in baseline
+            and bool(hunk_positions)
+        )
+        if is_creation:
+            for position in hunk_positions:
+                if not HUNK_LINE.match(section[position]):
+                    is_creation = False
+                    break
+                end = next((later for later in hunk_positions if later > position), len(section))
+                if any(line and not line.startswith("+") and line != "\\ No newline at end of file"
+                       for line in section[position + 1:end]):
+                    is_creation = False
+                    break
+        if is_creation:
+            ending = "\r\n" if lines[index].endswith("\r\n") else "\n"
+            result[index] = f"--- /dev/null{ending}"
+            result[index + 1] = f"+++ b/{new_path}{ending}"
+        index = next_header
+    return "".join(result).encode("utf-8")
+
+
+def _validate_exact_apply(diff: bytes, baseline_files: Iterable[tuple[str, bytes]] | None) -> None:
+    """Apply each verified patch against immutable source bytes in memory."""
+    if baseline_files is None:
+        return
+    try:
+        files = {_path(path): content for path, content in baseline_files}
+    except (TypeError, ValueError) as exc:
+        raise ImplementationArtifactError("artifact_baseline_invalid") from exc
+    if any(not isinstance(content, bytes) for content in files.values()):
+        raise ImplementationArtifactError("artifact_baseline_invalid")
+    try:
+        for patch in parse_verified_diff(diff):
+            if patch.old_path is not None and patch.old_path not in files:
+                raise ImplementationArtifactError("artifact_diff_base_mismatch")
+            apply_patch(b"" if patch.old_path is None else files[patch.old_path], patch)
+    except ImplementationArtifactError:
+        raise
+    except VerifiedPublicationError as exc:
+        code = str(exc)
+        if code in {"publication_patch_context_mismatch", "publication_patch_offset_invalid"}:
+            raise ImplementationArtifactError("artifact_diff_context_mismatch") from exc
+        raise ImplementationArtifactError("artifact_diff_apply_invalid") from exc
+
+
+def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any], *,
+                                   baseline_paths: Iterable[str] | None = None,
+                                   baseline_files: Iterable[tuple[str, bytes]] | None = None) -> VerifiedImplementationArtifact:
     """Validate an AI result against the immutable Worker envelope."""
     artifact = _decode(payload)
     if artifact["schema"] != SCHEMA or artifact["publication"] != "verification-only":
@@ -109,7 +230,11 @@ def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any]) -> 
         diff = base64.b64decode(artifact["diff_b64"], validate=True)
     except (TypeError, ValueError) as exc:
         raise ImplementationArtifactError("artifact_diff_encoding_invalid") from exc
-    paths = _diff_paths(diff)
+    diff = _canonicalize_unambiguous_creates(diff, baseline_paths)
+    files = _diff_files(diff)
+    _validate_baseline(files, baseline_paths)
+    _validate_exact_apply(diff, baseline_files)
+    paths = tuple(sorted({new_path or old_path for old_path, new_path in files if new_path or old_path}))
     declared = artifact["changed_paths"]
     if not isinstance(declared, list) or tuple(sorted({_path(item) for item in declared})) != paths:
         raise ImplementationArtifactError("artifact_changed_paths_mismatch")

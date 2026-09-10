@@ -1,6 +1,6 @@
 import unittest
 
-from github_verified_publisher import apply_patch, parse_verified_diff
+from github_verified_publisher import GitHubVerifiedPublisher, apply_patch, parse_verified_diff
 
 
 class VerifiedPublisherTest(unittest.TestCase):
@@ -13,3 +13,20 @@ class VerifiedPublisherTest(unittest.TestCase):
         diff = b"--- a/src/a.py\n+++ b/src/a.py\n@@ -1 +1 @@\n-old\n+new\n"
         with self.assertRaisesRegex(ValueError, "context_mismatch"):
             apply_patch(b"other\n", parse_verified_diff(diff)[0])
+
+    def test_opens_verified_artifacts_ready_for_review(self):
+        calls = []
+        publisher = GitHubVerifiedPublisher("a/b", "token")
+
+        def call(method, path, body=None):
+            calls.append((method, path, body))
+            return {"html_url": "https://example.test/pr/1"} if path.endswith("/pulls") else {}
+
+        publisher._call = call
+        publisher.publish(
+            task_id="task", execution_id="execution", base_commit="a" * 40,
+            diff=b"--- /dev/null\n+++ b/src/new.py\n@@ -0,0 +1 @@\n+created\n",
+            title="題名", body="本文",
+        )
+
+        self.assertFalse(calls[-1][2]["draft"])

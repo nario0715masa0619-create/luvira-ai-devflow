@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Callable, Protocol
 
 from execution_platform import ExecutionPlatform, V3Status
 from implementation_artifact_handoff import ImplementationArtifactHandoff, ImplementationArtifactHandoffError
 from opencode_implementation_client import OpenCodeImplementationError
+from source_snapshot import SourceSnapshot
 
 
 class ImplementationTaskReader(Protocol):
@@ -15,6 +17,7 @@ class ImplementationTaskReader(Protocol):
 
 class ImplementationTransaction(Protocol):
     def claim_implementation(self, task, record) -> None: ...
+    def record_implementation_progress(self, task, record) -> None: ...
     def record_result(self, task, record, expected_status: V3Status) -> None: ...
 
 
@@ -82,10 +85,30 @@ class ImplementationExecutionService:
                 self._fail(task, record, "IMPLEMENTATION_SOURCE_UNAVAILABLE_FINAL", outcomes)
                 continue
             try:
+                def progress(stream_events: int) -> None:
+                    # Only status metadata is durable; source and model text
+                    # must never enter the control plane.
+                    record.stream_events = stream_events
+                    record.last_progress_at = datetime.now(timezone.utc).isoformat()
+                    try:
+                        self._transaction.record_implementation_progress(task, record)
+                    except Exception:
+                        # The provider claim remains durable.  Do not turn a
+                        # transient heartbeat write failure into a duplicate
+                        # provider request.
+                        pass
+
+                source_content = source.content if isinstance(source, SourceSnapshot) else source
+                baseline_paths = source.paths if isinstance(source, SourceSnapshot) else None
+                baseline_files = source.files if isinstance(source, SourceSnapshot) else None
                 payload = self._client.generate_artifact(
-                    model=self._model, envelope=envelope, source_snapshot=source,
+                    model=self._model, envelope=envelope, source_snapshot=source_content,
+                    on_progress=progress,
                 )
-                self._handoff.receive_from_broker(record.execution_id, envelope, payload)
+                self._handoff.receive_from_broker(
+                    record.execution_id, envelope, payload,
+                    baseline_paths=baseline_paths, baseline_files=baseline_files,
+                )
             except OpenCodeImplementationError as exc:
                 self._fail(task, record, exc.code, outcomes)
                 continue

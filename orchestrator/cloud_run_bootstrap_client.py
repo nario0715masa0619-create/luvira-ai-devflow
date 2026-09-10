@@ -34,6 +34,16 @@ class CloudRunBootstrapClient:
         return f"projects/{self.project}/locations/{self.region}/jobs/{self.job}"
 
     def start(self, envelope: dict) -> str:
+        operation_name = self.start_operation(envelope)
+        for _ in range(30):
+            execution = self.execution_for_operation(operation_name)
+            if execution:
+                return execution
+            self._sleep(2)
+        raise CloudRunBootstrapClientError("cloud_run_start_timeout")
+
+    def start_operation(self, envelope: dict) -> str:
+        """Start a Job and return its durable Google long-running operation."""
         encoded = base64.b64encode(json.dumps(envelope, sort_keys=True).encode("utf-8")).decode("ascii")
         response = self._session.post(
             self._job_url + ":run",
@@ -44,16 +54,24 @@ class CloudRunBootstrapClient:
         operation_name = operation.get("name")
         if not isinstance(operation_name, str) or not operation_name:
             raise CloudRunBootstrapClientError("cloud_run_operation_invalid")
-        for _ in range(30):
-            result = self._json(self._session.get(f"https://run.googleapis.com/v2/{operation_name}", timeout=30), "cloud_run_operation_failed")
-            if result.get("done"):
-                execution = (result.get("response") or {}).get("name")
-                # Cloud Run returns a resource name, not its REST URL.
-                if isinstance(execution, str) and execution.startswith(self._job_resource + "/executions/"):
-                    return execution.rsplit("/", 1)[1]
-                raise CloudRunBootstrapClientError("cloud_run_execution_invalid")
-            self._sleep(2)
-        raise CloudRunBootstrapClientError("cloud_run_start_timeout")
+        return operation_name
+
+    def execution_for_operation(self, operation_name: str) -> str | None:
+        if not isinstance(operation_name, str) or not operation_name:
+            raise CloudRunBootstrapClientError("cloud_run_operation_invalid")
+        result = self._json(self._session.get(f"https://run.googleapis.com/v2/{operation_name}", timeout=30), "cloud_run_operation_failed")
+        # Cloud Run exposes the Execution resource in operation metadata as
+        # soon as the Job has accepted the launch.  Persisting that immutable
+        # identifier immediately lets a later Broker sweep observe the same
+        # Worker even when the long-running operation itself is still pending.
+        # The completed response remains a second, equivalent source.
+        execution = ((result.get("response") or {}).get("name")
+                     or (result.get("metadata") or {}).get("name"))
+        if isinstance(execution, str) and execution.startswith(self._job_resource + "/executions/"):
+            return execution.rsplit("/", 1)[1]
+        if not result.get("done"):
+            return None
+        raise CloudRunBootstrapClientError("cloud_run_execution_invalid")
 
     def find_execution_for_task(self, task_id: str, spec_hash: str) -> str | None:
         """Recover one accepted-but-unbound start without launching anything."""

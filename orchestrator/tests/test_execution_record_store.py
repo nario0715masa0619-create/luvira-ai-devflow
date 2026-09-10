@@ -17,7 +17,7 @@ def record():
 class ExecutionRecordStoreTest(unittest.TestCase):
     def test_record_payload_is_allow_listed_and_does_not_add_arbitrary_data(self):
         payload = record_payload(record())
-        self.assertEqual(set(payload), {"execution_id", "task_id", "spec_hash", "attempt", "status", "provider", "external_operation_id", "failure_code", "revision"})
+        self.assertEqual(set(payload), {"execution_id", "task_id", "spec_hash", "attempt", "status", "provider", "external_operation_id", "launch_operation_id", "failure_code", "stream_events", "last_progress_at", "revision"})
         self.assertEqual(record_from_payload(payload).status, V3Status.EXECUTION_QUEUED)
 
     def test_memory_store_rejects_duplicate_execution_identity(self):

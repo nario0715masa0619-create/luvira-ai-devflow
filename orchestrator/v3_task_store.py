@@ -27,7 +27,11 @@ def task_payload(task: V3Task) -> dict[str, Any]:
             "spec_hash": task.execution.spec_hash, "attempt": task.execution.attempt,
             "status": task.execution.status.value, "provider": task.execution.provider,
             "external_operation_id": task.execution.external_operation_id,
-            "failure_code": task.execution.failure_code, "revision": task.execution.revision,
+            "launch_operation_id": task.execution.launch_operation_id,
+            "failure_code": task.execution.failure_code,
+            "stream_events": task.execution.stream_events,
+            "last_progress_at": task.execution.last_progress_at,
+            "revision": task.execution.revision,
         }
     return payload
 
@@ -40,7 +44,11 @@ def task_from_payload(value: dict[str, Any]) -> V3Task:
             spec_hash=execution_value["spec_hash"], attempt=execution_value["attempt"],
             status=V3Status(execution_value["status"]), provider=execution_value.get("provider"),
             external_operation_id=execution_value.get("external_operation_id"),
-            failure_code=execution_value.get("failure_code"), revision=execution_value.get("revision", 1),
+            launch_operation_id=execution_value.get("launch_operation_id"),
+            failure_code=execution_value.get("failure_code"),
+            stream_events=execution_value.get("stream_events", 0),
+            last_progress_at=execution_value.get("last_progress_at"),
+            revision=execution_value.get("revision", 1),
         )
         task = V3Task(task_id=value["task_id"], spec=TaskSpec.from_dict(value["spec"]),
                       status=V3Status(value["status"]), approval_binding=value.get("approval_binding"),
@@ -107,7 +115,11 @@ class FirestoreV3TaskStore:
 
     def running(self):
         """Read claimed executions for result reconciliation only."""
-        return self._with_status(V3Status.EXECUTION_RUNNING.value)
+        return self._with_status([
+            V3Status.EXECUTION_RUNNING.value,
+            V3Status.WORKER_LAUNCH_ACCEPTED.value,
+            V3Status.WORKER_EXECUTION_IDENTIFIED.value,
+        ])
 
     def worker_health_verified(self):
         """Tasks eligible for exactly one Broker-held implementation request."""

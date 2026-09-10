@@ -43,12 +43,22 @@ class V3Transaction:
             if not task_snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(task_snapshot.to_dict())
-            if stored.status is not V3Status.AUTHORIZED:
-                raise V3TransactionError("v3_task_not_authorized")
+            if stored.status is V3Status.AUTHORIZED:
+                if stored.execution is not None or record.attempt != 1:
+                    raise V3TransactionError("v3_task_not_queueable")
+            elif stored.status is V3Status.EXECUTION_FAILED_RETRYABLE:
+                # A retry replaces only a terminal retryable execution.  Its
+                # attempt must advance exactly once, which prevents both
+                # replaying the old provider claim and skipping attempts.
+                if (stored.execution is None
+                        or stored.execution.status is not V3Status.EXECUTION_FAILED_RETRYABLE
+                        or record.attempt != stored.execution.attempt + 1
+                        or record.execution_id == stored.execution.execution_id):
+                    raise V3TransactionError("v3_task_retry_not_queueable")
+            else:
+                raise V3TransactionError("v3_task_not_queueable")
             if stored.spec.hash != task.spec.hash or stored.revision != task.revision:
                 raise V3TransactionError("v3_task_stale_or_modified")
-            if stored.execution is not None:
-                raise V3TransactionError("v3_execution_already_exists")
             payload = task_payload(task)
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
@@ -86,13 +96,18 @@ class V3Transaction:
         self._run_transaction(write)
         task.revision += 1
 
-    def record_external_operation(self, task: V3Task, record: ExecutionRecord) -> None:
-        """Bind the Cloud Run execution id to the already claimed task."""
-        if (task.status is not V3Status.EXECUTION_RUNNING
+    def record_worker_execution_identified(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Atomically persist the resolved Worker execution identity.
+
+        A new launch comes from ``WORKER_LAUNCH_ACCEPTED``.  The RUNNING
+        predecessor is a narrowly-scoped migration path for records persisted
+        before launch-operation IDs were introduced.
+        """
+        if (task.status is not V3Status.WORKER_EXECUTION_IDENTIFIED
                 or task.execution is not record
                 or not isinstance(record.external_operation_id, str)
                 or not record.external_operation_id):
-            raise V3TransactionError("external_operation_invalid")
+            raise V3TransactionError("worker_execution_identity_invalid")
         task_ref = self.tasks.document(task.task_id)
 
         def write(transaction: Any) -> None:
@@ -100,12 +115,44 @@ class V3Transaction:
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
-            if (stored.status is not V3Status.EXECUTION_RUNNING
+            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.WORKER_LAUNCH_ACCEPTED}
                     or stored.execution is None
                     or stored.execution.execution_id != record.execution_id
-                    or stored.execution.external_operation_id is not None
+                    or (stored.execution.external_operation_id is not None
+                        and stored.execution.external_operation_id != record.external_operation_id)
                     or stored.revision != task.revision):
-                raise V3TransactionError("v3_external_operation_not_recordable")
+                raise V3TransactionError("v3_worker_execution_identity_not_recordable")
+            payload = task_payload(task)
+            payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
+
+        self._run_transaction(write)
+        task.revision += 1
+
+    def record_launch_operation(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Durably bind the Cloud Run long-running launch operation.
+
+        The broker returns immediately after this transaction.  A later sweep
+        resolves the operation to an execution id, so control-plane startup
+        latency cannot strand or duplicate approved work.
+        """
+        if (task.status is not V3Status.WORKER_LAUNCH_ACCEPTED or task.execution is not record
+                or not isinstance(record.launch_operation_id, str) or not record.launch_operation_id
+                or record.external_operation_id is not None):
+            raise V3TransactionError("launch_operation_invalid")
+        task_ref = self.tasks.document(task.task_id)
+
+        def write(transaction: Any) -> None:
+            snapshot = task_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(snapshot.to_dict())
+            if (stored.status is not V3Status.EXECUTION_RUNNING or stored.execution is None
+                    or stored.execution.execution_id != record.execution_id
+                    or stored.execution.external_operation_id is not None
+                    or stored.execution.launch_operation_id is not None
+                    or stored.revision != task.revision):
+                raise V3TransactionError("v3_launch_operation_not_recordable")
             payload = task_payload(task)
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
@@ -125,7 +172,9 @@ class V3Transaction:
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
-            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED}
+            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.WORKER_EXECUTION_IDENTIFIED,
+                                      V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED,
+                                      V3Status.ARTIFACT_VERIFIED}
                     or stored.execution is None
                     or stored.execution.execution_id != record.execution_id
                     or stored.execution.external_operation_id != record.external_operation_id
@@ -157,6 +206,30 @@ class V3Transaction:
                     or stored.execution.execution_id != record.execution_id
                     or stored.revision != task.revision):
                 raise V3TransactionError("implementation_not_claimable")
+            payload = task_payload(task)
+            payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
+
+        self._run_transaction(write)
+        task.revision += 1
+
+    def record_implementation_progress(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Persist stream activity without retaining provider output."""
+        if (task.status is not V3Status.IMPLEMENTATION_GENERATING
+                or task.execution is not record or record.stream_events < 1):
+            raise V3TransactionError("implementation_progress_invalid")
+        task_ref = self.tasks.document(task.task_id)
+
+        def write(transaction: Any) -> None:
+            snapshot = task_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(snapshot.to_dict())
+            if (stored.status is not V3Status.IMPLEMENTATION_GENERATING
+                    or stored.execution is None
+                    or stored.execution.execution_id != record.execution_id
+                    or stored.revision != task.revision):
+                raise V3TransactionError("v3_implementation_progress_not_recordable")
             payload = task_payload(task)
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)

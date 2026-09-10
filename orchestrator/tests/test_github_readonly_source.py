@@ -21,5 +21,6 @@ class GitHubSourceTest(unittest.TestCase):
                 return Response({"tree": [{"type": "blob", "path": "src/a.py", "sha": "sha1"}]})
             return Response({"content": base64.b64encode(b"print(1)").decode()})
         snapshot = GitHubReadOnlySource("owner/repo", "token", opener).snapshot("a" * 40, ("src/",))
-        self.assertEqual(snapshot, b"--- src/a.py\nprint(1)\n")
+        self.assertEqual(snapshot.content, b"--- src/a.py\nprint(1)\n")
+        self.assertEqual(snapshot.paths, ("src/a.py",))
         self.assertTrue(all(method == "GET" for method in calls))

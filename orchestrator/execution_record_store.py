@@ -45,7 +45,11 @@ def record_from_payload(value: dict[str, Any]) -> ExecutionRecord:
             spec_hash=value["spec_hash"], attempt=value["attempt"],
             status=V3Status(value["status"]), provider=value.get("provider"),
             external_operation_id=value.get("external_operation_id"),
-            failure_code=value.get("failure_code"), revision=value.get("revision", 1),
+            launch_operation_id=value.get("launch_operation_id"),
+            failure_code=value.get("failure_code"),
+            stream_events=value.get("stream_events", 0),
+            last_progress_at=value.get("last_progress_at"),
+            revision=value.get("revision", 1),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise ExecutionPlatformError("execution_record_invalid") from exc

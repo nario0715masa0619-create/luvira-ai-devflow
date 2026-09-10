@@ -35,6 +35,8 @@ class V3Status(str, Enum):
     AUTHORIZED = "AUTHORIZED"
     EXECUTION_QUEUED = "EXECUTION_QUEUED"
     EXECUTION_RUNNING = "EXECUTION_RUNNING"
+    WORKER_LAUNCH_ACCEPTED = "WORKER_LAUNCH_ACCEPTED"
+    WORKER_EXECUTION_IDENTIFIED = "WORKER_EXECUTION_IDENTIFIED"
     EXECUTION_FAILED_RETRYABLE = "EXECUTION_FAILED_RETRYABLE"
     EXECUTION_FAILED_FINAL = "EXECUTION_FAILED_FINAL"
     WORKER_HEALTH_VERIFIED = "WORKER_HEALTH_VERIFIED"
@@ -150,7 +152,10 @@ class ExecutionRecord:
     status: V3Status
     provider: str | None = None
     external_operation_id: str | None = None
+    launch_operation_id: str | None = None
     failure_code: str | None = None
+    stream_events: int = 0
+    last_progress_at: str | None = None
     revision: int = 1
 
 
@@ -262,7 +267,12 @@ class ExecutionPlatform:
     @staticmethod
     def fail_existing(task: V3Task, execution_id: str, code: str) -> V3Task:
         """Record a classified result on an already loaded running task."""
-        if task.status not in {V3Status.EXECUTION_RUNNING, V3Status.IMPLEMENTATION_GENERATING}:
+        if task.status not in {
+                V3Status.EXECUTION_RUNNING,
+                V3Status.WORKER_EXECUTION_IDENTIFIED,
+                V3Status.IMPLEMENTATION_GENERATING,
+                V3Status.ARTIFACT_VERIFIED,
+        }:
             raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if task.execution is None or task.execution.execution_id != execution_id:
             raise TransitionRejected("execution_identity_mismatch")
@@ -277,13 +287,50 @@ class ExecutionPlatform:
     @staticmethod
     def verify_worker_health_existing(task: V3Task, execution_id: str) -> V3Task:
         """Record the credential-free Worker health proof, not an AI result."""
-        if task.status is not V3Status.EXECUTION_RUNNING:
+        if task.status is not V3Status.WORKER_EXECUTION_IDENTIFIED:
             raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
         if task.execution is None or task.execution.execution_id != execution_id:
             raise TransitionRejected("execution_identity_mismatch")
         task.execution.status = V3Status.WORKER_HEALTH_VERIFIED
         task.status = V3Status.WORKER_HEALTH_VERIFIED
         task.audit.append("WORKER_HEALTH_VERIFIED")
+        return task
+
+    @staticmethod
+    def accept_worker_launch_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Seal an accepted Cloud Run launch before any recovery can run."""
+        if task.status is not V3Status.EXECUTION_RUNNING:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        if not task.execution.launch_operation_id:
+            raise TransitionRejected("launch_operation_required")
+        task.execution.status = V3Status.WORKER_LAUNCH_ACCEPTED
+        task.status = V3Status.WORKER_LAUNCH_ACCEPTED
+        task.audit.append("WORKER_LAUNCH_ACCEPTED")
+        return task
+
+    @staticmethod
+    def identify_worker_execution_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Bind the current Worker execution after its launch was accepted.
+
+        ``EXECUTION_RUNNING`` is accepted only for records written before the
+        accepted-launch state existed.  This is an explicit one-way migration
+        path for durable historical work; new dispatches always arrive from
+        ``WORKER_LAUNCH_ACCEPTED``.
+        """
+        if task.status not in {
+                V3Status.WORKER_LAUNCH_ACCEPTED,
+                V3Status.EXECUTION_RUNNING,
+        }:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        if not task.execution.external_operation_id:
+            raise TransitionRejected("worker_execution_id_required")
+        task.execution.status = V3Status.WORKER_EXECUTION_IDENTIFIED
+        task.status = V3Status.WORKER_EXECUTION_IDENTIFIED
+        task.audit.append("WORKER_EXECUTION_IDENTIFIED")
         return task
 
     @staticmethod

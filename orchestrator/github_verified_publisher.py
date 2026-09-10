@@ -7,6 +7,7 @@ import json
 import re
 from dataclasses import dataclass
 from urllib.parse import quote
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -42,11 +43,12 @@ def parse_verified_diff(diff: bytes) -> tuple[FilePatch, ...]:
     except UnicodeDecodeError as exc:
         raise VerifiedPublicationError("publication_patch_not_utf8") from exc
     patches, old_path, new_path, hunks = [], None, None, []
+    have_header = False
     index = 0
     while index < len(lines):
         line = lines[index]
         if line.startswith("--- "):
-            if old_path is not None:
+            if have_header:
                 if not hunks:
                     raise VerifiedPublicationError("publication_patch_hunk_required")
                 patches.append(FilePatch(old_path, new_path, tuple(hunks)))
@@ -56,11 +58,11 @@ def parse_verified_diff(diff: bytes) -> tuple[FilePatch, ...]:
             old_path, new_path = _path(line[4:].split("\t", 1)[0]), _path(lines[index + 1][4:].split("\t", 1)[0])
             if old_path is None and new_path is None:
                 raise VerifiedPublicationError("publication_patch_header_invalid")
-            hunks, index = [], index + 2
+            have_header, hunks, index = True, [], index + 2
             continue
         match = HUNK.match(line)
         if match:
-            if old_path is None:
+            if not have_header:
                 raise VerifiedPublicationError("publication_patch_header_invalid")
             start = int(match.group(1))
             body, index = [], index + 1
@@ -73,7 +75,7 @@ def parse_verified_diff(diff: bytes) -> tuple[FilePatch, ...]:
             hunks.append((start, tuple(body)))
             continue
         index += 1
-    if old_path is not None:
+    if have_header:
         patches.append(FilePatch(old_path, new_path, tuple(hunks)))
     if not patches or any(not item.hunks for item in patches):
         raise VerifiedPublicationError("publication_patch_hunk_required")
@@ -85,7 +87,9 @@ def apply_patch(original: bytes, patch: FilePatch) -> bytes:
     source = [] if patch.old_path is None else original.decode("utf-8").splitlines()
     output, cursor = [], 0
     for start, hunk in patch.hunks:
-        offset = start - 1
+        # A standard creation hunk is ``@@ -0,0 +1,N @@``.  It applies at
+        # the beginning of an empty source rather than at a negative index.
+        offset = 0 if patch.old_path is None and start == 0 else start - 1
         if offset < cursor or offset > len(source):
             raise VerifiedPublicationError("publication_patch_offset_invalid")
         output.extend(source[cursor:offset])
@@ -123,6 +127,8 @@ class GitHubVerifiedPublisher:
         try:
             with self._opener(request, timeout=20) as response:
                 payload = response.read()
+        except HTTPError as exc:
+            raise VerifiedPublicationError(f"publication_github_http_{exc.code}") from exc
         except Exception as exc:
             raise VerifiedPublicationError("publication_github_unavailable") from exc
         if not payload:
@@ -146,7 +152,12 @@ class GitHubVerifiedPublisher:
             source = b""
             sha = None
             if patch.old_path is not None:
-                current = self._call("GET", f"/repos/{repo}/contents/{quote(patch.old_path, safe='/')}?ref={quote(base_commit, safe='')}")
+                try:
+                    current = self._call("GET", f"/repos/{repo}/contents/{quote(patch.old_path, safe='/')}?ref={quote(base_commit, safe='')}")
+                except VerifiedPublicationError as exc:
+                    if str(exc) == "publication_github_http_404":
+                        raise VerifiedPublicationError("publication_base_content_missing") from exc
+                    raise
                 try:
                     source = base64.b64decode(current["content"], validate=True); sha = current["sha"]
                 except (KeyError, TypeError, ValueError) as exc:
@@ -162,7 +173,11 @@ class GitHubVerifiedPublisher:
                 if sha is not None:
                     body_value["sha"] = sha
                 self._call("PUT", f"/repos/{repo}/contents/{quote(target, safe='/')}", body_value)
-        pull = self._call("POST", f"/repos/{repo}/pulls", {"title": title, "head": branch, "base": "main", "body": body, "draft": True})
+        # The verified artifact has already passed the immutable-base and
+        # scope checks.  Open it ready for review so the independent reviewer
+        # actually runs; branch protection and the human merge decision still
+        # prevent publication to main.
+        pull = self._call("POST", f"/repos/{repo}/pulls", {"title": title, "head": branch, "base": "main", "body": body, "draft": False})
         url = pull.get("html_url")
         if not isinstance(url, str) or not url:
             raise VerifiedPublicationError("publication_pull_invalid")
