@@ -85,7 +85,7 @@ class WorkerResultReconciler:
                             outcomes.append((task.task_id, "WORKER_DISPATCH_RETRYABLE", record.execution_id))
                             continue
                     except CloudRunBootstrapClientError as exc:
-                        if str(exc) == "cloud_run_execution_ambiguous":
+                        if str(exc) == "cloud_run_execution_ambiguous" and not record.launch_operation_id:
                             # This recovery path is only for records created
                             # before launch-operation persistence existed.  The
                             # isolated Worker has no provider, source-write,
@@ -102,6 +102,16 @@ class WorkerResultReconciler:
                                 V3Status.EXECUTION_FAILED_RETRYABLE,
                             )
                             outcomes.append((task.task_id, "WORKER_DISPATCH_RETRYABLE", record.execution_id))
+                            continue
+                        if record.launch_operation_id:
+                            # A recorded launch operation is proof that Cloud
+                            # Run accepted this exact Worker request.  Never
+                            # turn an ambiguous historical execution search
+                            # into a retry: doing so would create a duplicate
+                            # Worker (and potentially a duplicate provider
+                            # request).  Keep the durable claim and retry
+                            # only the read-side reconciliation later.
+                            outcomes.append((task.task_id, "WORKER_LAUNCH_RECOVERY_PENDING", record.launch_operation_id))
                             continue
                         outcomes.append((task.task_id, "DISPATCH_OUTCOME_UNKNOWN", record.execution_id))
                         continue
@@ -153,14 +163,12 @@ class WorkerResultReconciler:
     def _recover_execution(self, task: V3Task, record: ExecutionRecord) -> str | None:
         """Resolve one accepted launch without ever creating another Worker.
 
-        The durable Cloud Run operation is the preferred proof.  If its read
-        is temporarily unavailable, a uniquely envelope-bound execution is an
-        equally narrow recovery proof.  Both paths are read-only and neither
-        can spend a second provider request.
+        The durable Cloud Run operation is the proof whenever it exists.  A
+        legacy record without that operation may use a uniquely
+        envelope-bound execution.  Do not search historical executions for a
+        known accepted launch: an old retry can share the envelope and make
+        the result ambiguous, which must never create another Worker.
         """
         if not record.launch_operation_id:
             return self._worker.find_execution_for_task(task.task_id, task.spec.hash)
-        try:
-            return self._worker.execution_for_operation(record.launch_operation_id)
-        except CloudRunBootstrapClientError:
-            return self._worker.find_execution_for_task(task.task_id, task.spec.hash)
+        return self._worker.execution_for_operation(record.launch_operation_id)

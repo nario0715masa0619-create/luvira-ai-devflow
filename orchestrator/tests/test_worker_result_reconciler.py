@@ -73,7 +73,7 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         self.assertEqual(task.execution.external_operation_id, "run-456")
         self.assertEqual(writes, ["bound"])
 
-    def test_completed_launch_falls_back_to_one_envelope_bound_execution(self):
+    def test_known_launch_does_not_search_historical_executions_after_a_read_failure(self):
         task = running_task()
         task.execution.external_operation_id = None
         task.execution.launch_operation_id = "operations/123"
@@ -82,15 +82,29 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         transaction = type("Tx", (), {"record_external_operation": lambda *_: writes.append("bound"), "record_result": lambda *_: None})()
         worker = type("Worker", (), {
             "execution_for_operation": lambda *_: (_ for _ in ()).throw(CloudRunBootstrapClientError("cloud_run_operation_failed")),
-            "find_execution_for_task": lambda *_: "run-456",
-            "completion_state": lambda *_: "PENDING",
+            "find_execution_for_task": lambda *_: self.fail("known launch must not use historical search"),
         })()
         logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
         reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))
 
-        self.assertEqual(reconciler.sweep(), [("task", "WORKER_RUNNING", "run-456")])
-        self.assertEqual(task.execution.external_operation_id, "run-456")
-        self.assertEqual(writes, ["bound"])
+        self.assertEqual(reconciler.sweep(), [("task", "WORKER_LAUNCH_RECOVERY_PENDING", "operations/123")])
+        self.assertIsNone(task.execution.external_operation_id)
+        self.assertEqual(writes, [])
+
+    def test_known_launch_with_ambiguous_history_remains_pending_without_retry(self):
+        task = running_task()
+        task.execution.external_operation_id = None
+        task.execution.launch_operation_id = "operations/123"
+        writes = []
+        tasks = type("Tasks", (), {"running": lambda _: [task]})()
+        transaction = type("Tx", (), {"record_external_operation": lambda *_: writes.append("bound"), "record_result": lambda *_: writes.append("result")})()
+        worker = type("Worker", (), {"execution_for_operation": lambda *_: (_ for _ in ()).throw(CloudRunBootstrapClientError("cloud_run_execution_ambiguous"))})()
+        logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
+        reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))
+
+        self.assertEqual(reconciler.sweep(), [("task", "WORKER_LAUNCH_RECOVERY_PENDING", "operations/123")])
+        self.assertEqual(task.status, V3Status.EXECUTION_RUNNING)
+        self.assertEqual(writes, [])
 
     def test_bind_conflict_is_retried_without_launching_another_worker(self):
         task = running_task()
