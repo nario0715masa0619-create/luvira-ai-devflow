@@ -30,6 +30,24 @@ def artifact_events():
     ]
 
 
+def full_file_artifact_events():
+    payload = json.dumps({
+        "schema": "luvira.devflow.implementation-artifact.v2",
+        "task_id": "t",
+        "spec_hash": "a" * 64,
+        "base_commit": "b" * 40,
+        "files": [{"path": "src/example.py", "content": "new\n"}],
+        "changed_paths": ["src/example.py"],
+        "tests": [],
+        "publication": "verification-only",
+    })
+    return [
+        {"choices": [{"delta": {"content": payload[:20]}}]},
+        {"choices": [{"delta": {"content": payload[20:]}}]},
+        "[DONE]",
+    ]
+
+
 class OpenCodeImplementationClientTest(unittest.TestCase):
     def test_returns_only_provider_artifact_json_without_exposing_key(self):
         calls = []
@@ -48,7 +66,8 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         self.assertEqual(request_body["response_format"], {"type": "json_object"})
         self.assertEqual(calls[0][0].get_header("X-opencode-session"), "luvira-0d9907cf80722b6e7d79ddfcc4ec1ba4")
         prompt = json.loads(request_body["messages"][0]["content"])
-        self.assertTrue(any("never base64" in rule for rule in prompt["artifact_rules"]))
+        self.assertEqual(prompt["contract"]["schema"], "luvira.devflow.implementation-artifact.v2")
+        self.assertTrue(any("complete UTF-8 replacement text" in rule for rule in prompt["artifact_rules"]))
         self.assertTrue(any("GitHub CI is the merge gate" in rule for rule in prompt["artifact_rules"]))
 
     def test_session_id_is_stable_for_the_same_approved_task(self):
@@ -62,6 +81,18 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         client.generate_artifact(model="kimi-k2.6", envelope=envelope, source_snapshot=b"x")
         self.assertEqual(calls[0].get_header("X-opencode-session"), calls[1].get_header("X-opencode-session"))
         self.assertNotIn("secret", calls[0].get_header("X-opencode-session"))
+
+    def test_preserves_complete_file_artifact_for_deterministic_verification(self):
+        client = OpenCodeImplementationClient("secret", lambda *_, **__: Response(full_file_artifact_events()))
+        result = json.loads(client.generate_artifact(
+            model="kimi-k2.6",
+            envelope={"task_id":"t", "spec_hash":"a" * 64, "base_commit":"b" * 40,
+                      "allowed_paths":["src/"], "acceptance_criteria":["test"]},
+            source_snapshot=b"x",
+        ))
+        self.assertEqual(result["schema"], "luvira.devflow.implementation-artifact.v2")
+        self.assertEqual(result["files"], [{"path": "src/example.py", "content": "new\n"}])
+        self.assertNotIn("diff_b64", result)
 
     def test_records_progress_only_after_stream_bytes_arrive(self):
         times = iter([0, 31])
