@@ -1,0 +1,243 @@
+{
+  "name": "Analyze Repository for Reuse",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-1",
+      "name": "Execute Workflow",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            { "name": "repoOwner", "value": "nario0715masa0619-create", "type": "string" },
+            { "name": "repoName", "value": "luvira-ai-devflow", "type": "string" },
+            { "name": "branch", "value": "main", "type": "string" },
+            { "name": "llmModel", "value": "gpt-4o-mini", "type": "string" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "set-1",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.github.com/repos/{{ $json.repoOwner }}/{{ $json.repoName }}/git/trees/{{ $json.branch }}?recursive=1",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.GITHUB_TOKEN }}" },
+            { "name": "Accept", "value": "application/vnd.github+json" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-1",
+      "name": "Get Tree",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const tree = $input.first().json.tree || [];\nconst files = tree\n  .filter(i => i.path === 'README.md' || (i.path.startsWith('docs/') && i.path.endsWith('.md')))\n  .map(i => i.path);\nreturn [{ json: { files } }];"
+      },
+      "id": "code-1",
+      "name": "Filter Markdown",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            { "id": "cond-1", "leftValue": "={{ $json.files.length }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "if-1",
+      "name": "If Has Files",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {},
+      "id": "noop-1",
+      "name": "NoOp",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1200, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-1",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [1200, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=https://raw.githubusercontent.com/{{ $('Set Config').item.json.repoOwner }}/{{ $('Set Config').item.json.repoName }}/{{ $('Set Config').item.json.branch }}/{{ $json.files }}",
+        "options": {}
+      },
+      "id": "http-2",
+      "name": "Fetch Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1400, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $items('Fetch Content');\nconst contents = items.map(item => ({\n  path: item.json.files,\n  content: typeof item.json.data === 'string' ? item.json.data : JSON.stringify(item.json.data)\n}));\nreturn [{ json: { contents } }];"
+      },
+      "id": "code-2",
+      "name": "Aggregate Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1600, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const contents = $input.first().json.contents;\nconst docs = contents.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n');\nconst system = 'You are a technical analyst. Analyze the provided repository documents and return a single JSON object with the following schema: { repository_summary: string, reuse_candidates: Array<{title:string,description:string,source_files:Array<string>,reusability_score:number,notes:string}>, cautions: Array<{category:string,description:string,source_files:Array<string>}>, metadata: {analyzed_at:string,total_files:number,file_paths:Array<string>} }. Respond only with the JSON object, no markdown fences.';\nconst body = JSON.stringify({\n  model: $('Set Config').item.json.llmModel || 'gpt-4o-mini',\n  messages: [{role:'system',content:system},{role:'user',content:docs}],\n  response_format: {type:'json_object'},\n  max_tokens: 8000\n});\nreturn [{ json: { body, system, docs, fileCount: contents.length, paths: contents.map(c => c.path) } }];"
+      },
+      "id": "code-3",
+      "name": "Build Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1800, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "=Bearer {{ $env.OPENAI_API_KEY }}" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "string",
+        "body": "={{ $json.body }}",
+        "options": {}
+      },
+      "id": "http-3",
+      "name": "Call LLM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.choices?.[0]?.message?.content || '{}';\nlet parsed = {};\ntry { parsed = JSON.parse(raw); } catch(e) { parsed = { parse_error: true, raw }; }\nreturn [{ json: parsed }];"
+      },
+      "id": "code-4",
+      "name": "Extract JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2200, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "const analysis = $input.first().json;\nconst now = new Date().toISOString();\nconst repo = $('Set Config').item.json.repoOwner + '/' + $('Set Config').item.json.repoName;\nconst paths = $('Build Prompt').item.json.paths || [];\nconst chunks = paths.map(p => ({\n  chunk_id: p.replace(/[^a-zA-Z0-9]/g, '-'),\n  source_path: p,\n  content_digest: 'auto',\n  embedding_ready: true\n}));\nconst out = {\n  schema_version: 'luvira.repo-analysis.v1',\n  repository: repo,\n  generated_at: now,\n  summary: { repository_summary: analysis.repository_summary || '' },\n  reuse_candidates: analysis.reuse_candidates || [],\n  cautions: analysis.cautions || [],\n  chunks,\n  raw_analysis: analysis\n};\nreturn [{ json: out }];"
+      },
+      "id": "code-5",
+      "name": "Add RAG Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2400, 200]
+    },
+    {
+      "parameters": {
+        "operation": "toJson",
+        "fileName": "=repo-analysis-{{ Date.now() }}.json"
+      },
+      "id": "convert-1",
+      "name": "Convert to File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1,
+      "position": [2600, 200]
+    },
+    {
+      "parameters": {
+        "fileName": "=/tmp/repo-analysis-{{ Date.now() }}.json",
+        "data": "={{ $binary.data }}"
+      },
+      "id": "write-1",
+      "name": "Save File",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [2800, 200]
+    }
+  ],
+  "connections": {
+    "Execute Workflow": {
+      "main": [[{ "node": "Set Config", "type": "main", "index": 0 }]]
+    },
+    "Set Config": {
+      "main": [[{ "node": "Get Tree", "type": "main", "index": 0 }]]
+    },
+    "Get Tree": {
+      "main": [[{ "node": "Filter Markdown", "type": "main", "index": 0 }]]
+    },
+    "Filter Markdown": {
+      "main": [[{ "node": "If Has Files", "type": "main", "index": 0 }]]
+    },
+    "If Has Files": {
+      "main": [
+        [{ "node": "Split In Batches", "type": "main", "index": 0 }],
+        [{ "node": "NoOp", "type": "main", "index": 0 }]
+      ]
+    },
+    "Split In Batches": {
+      "main": [
+        [{ "node": "Fetch Content", "type": "main", "index": 0 }],
+        [{ "node": "Aggregate Content", "type": "main", "index": 0 }]
+      ]
+    },
+    "Fetch Content": {
+      "main": [[{ "node": "Split In Batches", "type": "main", "index": 0 }]]
+    },
+    "Aggregate Content": {
+      "main": [[{ "node": "Build Prompt", "type": "main", "index": 0 }]]
+    },
+    "Build Prompt": {
+      "main": [[{ "node": "Call LLM", "type": "main", "index": 0 }]]
+    },
+    "Call LLM": {
+      "main": [[{ "node": "Extract JSON", "type": "main", "index": 0 }]]
+    },
+    "Extract JSON": {
+      "main": [[{ "node": "Add RAG Metadata", "type": "main", "index": 0 }]]
+    },
+    "Add RAG Metadata": {
+      "main": [[{ "node": "Convert to File", "type": "main", "index": 0 }]]
+    },
+    "Convert to File": {
+      "main": [[{ "node": "Save File", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "analyze-repo-for-reuse",
+  "tags": []
+}
