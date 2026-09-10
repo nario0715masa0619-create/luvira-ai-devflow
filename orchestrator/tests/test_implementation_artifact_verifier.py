@@ -2,7 +2,7 @@ import base64
 import json
 import unittest
 
-from implementation_artifact_verifier import ImplementationArtifactError, SCHEMA, verify_implementation_artifact
+from implementation_artifact_verifier import ImplementationArtifactError, MODEL_SCHEMA, SCHEMA, verify_implementation_artifact
 from github_verified_publisher import parse_verified_diff
 
 ENVELOPE = {"task_id": "task", "spec_hash": "a" * 64, "base_commit": "b" * 40, "allowed_paths": ["src/"]}
@@ -13,6 +13,14 @@ def payload(**changes):
     value = {"schema": SCHEMA, "task_id": "task", "spec_hash": "a" * 64, "base_commit": "b" * 40,
              "diff_b64": base64.b64encode(DIFF).decode(), "changed_paths": ["src/example.py"],
              "tests": [{"name": "unit", "status": "passed"}], "publication": "verification-only"}
+    value.update(changes)
+    return json.dumps(value).encode()
+
+
+def model_payload(**changes):
+    value = {"schema": MODEL_SCHEMA, "task_id": "task", "spec_hash": "a" * 64, "base_commit": "b" * 40,
+             "files": [{"path": "src/example.py", "content": "new\n"}], "changed_paths": ["src/example.py"],
+             "tests": [], "publication": "verification-only"}
     value.update(changes)
     return json.dumps(value).encode()
 
@@ -87,3 +95,18 @@ class ImplementationArtifactVerifierTest(unittest.TestCase):
             baseline_files=(("src/example.py", b"old\n"),),
         )
         self.assertEqual(result.changed_paths, ("src/example.py",))
+
+    def test_deterministically_builds_an_applicable_diff_from_full_file_content(self):
+        result = verify_implementation_artifact(
+            model_payload(), ENVELOPE,
+            baseline_paths=("src/example.py",), baseline_files=(("src/example.py", b"old\n"),),
+        )
+        self.assertEqual(result.diff, DIFF)
+        self.assertEqual(result.changed_paths, ("src/example.py",))
+
+    def test_rejects_unsorted_or_unchanged_full_file_entries(self):
+        with self.assertRaisesRegex(ImplementationArtifactError, "unchanged"):
+            verify_implementation_artifact(
+                model_payload(files=[{"path": "src/example.py", "content": "old\n"}]), ENVELOPE,
+                baseline_files=(("src/example.py", b"old\n"),),
+            )

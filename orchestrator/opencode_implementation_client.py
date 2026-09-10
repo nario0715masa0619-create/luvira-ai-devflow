@@ -43,19 +43,19 @@ def _prompt(envelope: dict[str, Any], source: str) -> str:
         "role": "implementation-agent",
         "instruction": "Return exactly one JSON implementation artifact. Do not return Markdown, commands, prose, credentials, or a pull request.",
         "contract": {
-            "schema": "luvira.devflow.implementation-artifact.v1",
+            "schema": "luvira.devflow.implementation-artifact.v2",
             "publication": "verification-only",
             "task_id": envelope["task_id"],
             "spec_hash": envelope["spec_hash"],
             "base_commit": envelope["base_commit"],
             "allowed_paths": envelope["allowed_paths"],
-            "required_fields": ["schema", "task_id", "spec_hash", "base_commit", "diff", "changed_paths", "tests", "publication"],
+            "required_fields": ["schema", "task_id", "spec_hash", "base_commit", "files", "changed_paths", "tests", "publication"],
         },
         "acceptance_criteria": envelope["acceptance_criteria"],
         "artifact_rules": [
             "Return a JSON object with exactly the contract.required_fields plus schema and publication; do not omit or add fields.",
-            "diff must be a non-empty UTF-8 unified diff as a JSON string, never base64. Every changed file must have consecutive --- a/path and +++ b/path headers.",
-            "changed_paths must be the sorted unique paths from the +++ diff headers, and every path must be within allowed_paths.",
+            "files must be a non-empty JSON array of {path,content}; content is the complete UTF-8 replacement text for that changed file and must end with a newline. Never return a diff or base64.",
+            "files and changed_paths must use the same sorted unique paths, and every path must be within allowed_paths.",
             "tests must be an array of {name,status}; status is only passed or skipped. Leave it empty unless a result is actually available; GitHub CI is the merge gate.",
             "Do not change protected paths, include secrets, use /dev/null paths, or include prose outside the JSON object.",
         ],
@@ -135,7 +135,7 @@ class OpenCodeImplementationClient:
 
     @staticmethod
     def _verifier_artifact(artifact: Any) -> dict[str, Any]:
-        """Convert the model's readable diff into the verifier-only envelope.
+        """Preserve a full-file artifact or convert a legacy readable diff.
 
         Base64 is a transport encoding, not an implementation task.  Keeping
         that transformation in the Broker removes an error-prone generation
@@ -143,6 +143,13 @@ class OpenCodeImplementationClient:
         """
         if not isinstance(artifact, dict) or "diff_b64" in artifact:
             raise ValueError("artifact_shape_invalid")
+        # v2 intentionally contains complete file contents.  The verifier
+        # creates the only publishable diff from the immutable source snapshot,
+        # so the model never has to reproduce fragile hunk context.
+        if artifact.get("schema") == "luvira.devflow.implementation-artifact.v2":
+            if "diff" in artifact:
+                raise ValueError("artifact_shape_invalid")
+            return artifact
         diff = artifact.pop("diff", None)
         if not isinstance(diff, str) or not diff:
             raise ValueError("artifact_diff_invalid")

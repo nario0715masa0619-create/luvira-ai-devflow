@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import difflib
 import json
 import re
 from dataclasses import dataclass
@@ -14,7 +15,9 @@ from github_verified_publisher import VerifiedPublicationError, apply_patch, par
 MAX_ARTIFACT_BYTES = 512 * 1024
 MAX_DIFF_BYTES = 384 * 1024
 SCHEMA = "luvira.devflow.implementation-artifact.v1"
+MODEL_SCHEMA = "luvira.devflow.implementation-artifact.v2"
 REQUIRED_KEYS = {"schema", "task_id", "spec_hash", "base_commit", "diff_b64", "changed_paths", "tests", "publication"}
+MODEL_REQUIRED_KEYS = {"schema", "task_id", "spec_hash", "base_commit", "files", "changed_paths", "tests", "publication"}
 PROTECTED_PREFIXES = (".git/", ".github/", "security/", "infra/", "terraform/")
 FORBIDDEN_SUFFIXES = (".pem", ".key", ".p12", ".pfx", ".pyc", ".pyo")
 SECRET_MARKERS = ("-----BEGIN ", "AKIA", "AIza", "ghp_", "github_pat_", "xoxb-")
@@ -64,9 +67,63 @@ def _decode(value: bytes) -> dict[str, Any]:
         artifact = json.loads(value.decode("utf-8"), object_pairs_hook=_no_duplicates)
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ImplementationArtifactError("artifact_json_invalid") from exc
-    if not isinstance(artifact, dict) or set(artifact) != REQUIRED_KEYS:
+    if not isinstance(artifact, dict):
+        raise ImplementationArtifactError("artifact_schema_mismatch")
+    expected = MODEL_REQUIRED_KEYS if artifact.get("schema") == MODEL_SCHEMA else REQUIRED_KEYS
+    if set(artifact) != expected:
         raise ImplementationArtifactError("artifact_schema_mismatch")
     return artifact
+
+
+def _deterministic_diff(artifact: dict[str, Any], baseline_files: Iterable[tuple[str, bytes]] | None) -> bytes:
+    """Create the sole unified diff from immutable bytes and full-file output.
+
+    Models are good at writing a complete target file but unreliable at
+    reproducing every hunk offset and context line.  This keeps patch syntax
+    and applicability inside the trusted Broker boundary.
+    """
+    if baseline_files is None:
+        raise ImplementationArtifactError("artifact_baseline_required")
+    try:
+        baseline = {_path(path): content for path, content in baseline_files}
+    except (TypeError, ValueError) as exc:
+        raise ImplementationArtifactError("artifact_baseline_invalid") from exc
+    if any(not isinstance(content, bytes) for content in baseline.values()):
+        raise ImplementationArtifactError("artifact_baseline_invalid")
+    entries = artifact.get("files")
+    if not isinstance(entries, list) or not entries:
+        raise ImplementationArtifactError("artifact_files_required")
+    rendered: list[str] = []
+    paths: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict) or set(entry) != {"path", "content"}:
+            raise ImplementationArtifactError("artifact_files_invalid")
+        path, content = _path(entry["path"]), entry["content"]
+        if not isinstance(content, str) or not content.endswith("\n"):
+            raise ImplementationArtifactError("artifact_file_content_invalid")
+        if path in paths:
+            raise ImplementationArtifactError("artifact_file_duplicate")
+        paths.append(path)
+        try:
+            target = content.encode("utf-8")
+            original = baseline.get(path)
+            original_text = [] if original is None else original.decode("utf-8").splitlines(keepends=True)
+        except UnicodeDecodeError as exc:
+            raise ImplementationArtifactError("artifact_file_content_invalid") from exc
+        if original == target:
+            raise ImplementationArtifactError("artifact_file_unchanged")
+        before = "/dev/null" if original is None else f"a/{path}"
+        after = f"b/{path}"
+        rendered.extend(difflib.unified_diff(
+            original_text, content.splitlines(keepends=True), fromfile=before, tofile=after,
+            lineterm="\n",
+        ))
+    if paths != sorted(paths):
+        raise ImplementationArtifactError("artifact_files_not_sorted")
+    declared = artifact.get("changed_paths")
+    if not isinstance(declared, list) or tuple(sorted({_path(item) for item in declared})) != tuple(paths):
+        raise ImplementationArtifactError("artifact_changed_paths_mismatch")
+    return "".join(rendered).encode("utf-8")
 
 
 def _diff_files(diff: bytes) -> tuple[tuple[str | None, str | None], ...]:
@@ -221,16 +278,19 @@ def verify_implementation_artifact(payload: bytes, envelope: dict[str, Any], *,
                                    baseline_files: Iterable[tuple[str, bytes]] | None = None) -> VerifiedImplementationArtifact:
     """Validate an AI result against the immutable Worker envelope."""
     artifact = _decode(payload)
-    if artifact["schema"] != SCHEMA or artifact["publication"] != "verification-only":
+    if artifact["schema"] not in {SCHEMA, MODEL_SCHEMA} or artifact["publication"] != "verification-only":
         raise ImplementationArtifactError("artifact_schema_unsupported")
     for field in ("task_id", "spec_hash", "base_commit"):
         if artifact[field] != envelope.get(field):
             raise ImplementationArtifactError(f"artifact_{field}_mismatch")
-    try:
-        diff = base64.b64decode(artifact["diff_b64"], validate=True)
-    except (TypeError, ValueError) as exc:
-        raise ImplementationArtifactError("artifact_diff_encoding_invalid") from exc
-    diff = _canonicalize_unambiguous_creates(diff, baseline_paths)
+    if artifact["schema"] == MODEL_SCHEMA:
+        diff = _deterministic_diff(artifact, baseline_files)
+    else:
+        try:
+            diff = base64.b64decode(artifact["diff_b64"], validate=True)
+        except (TypeError, ValueError) as exc:
+            raise ImplementationArtifactError("artifact_diff_encoding_invalid") from exc
+        diff = _canonicalize_unambiguous_creates(diff, baseline_paths)
     files = _diff_files(diff)
     _validate_baseline(files, baseline_paths)
     _validate_exact_apply(diff, baseline_files)
