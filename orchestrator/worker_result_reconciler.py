@@ -9,6 +9,7 @@ from cloud_run_bootstrap_client import CloudRunBootstrapClientError
 from execution_platform import ExecutionPlatform, ExecutionRecord, V3Status, V3Task
 from execution_result_adapter import ExecutionResultAdapterError, extract_bootstrap_artifact
 from v3_worker_envelope import from_running_task
+from v3_transaction import V3TransactionError
 
 
 class RunningTaskReader(Protocol):
@@ -50,12 +51,19 @@ class WorkerResultReconciler:
             if record is None or not record.external_operation_id:
                 if record is not None:
                     try:
-                        recovered = (self._worker.execution_for_operation(record.launch_operation_id)
-                                     if record.launch_operation_id else
-                                     self._worker.find_execution_for_task(task.task_id, task.spec.hash))
+                        recovered = self._recover_execution(task, record)
                         if recovered:
                             record.external_operation_id = recovered
-                            self._transaction.record_external_operation(task, record)
+                            try:
+                                self._transaction.record_external_operation(task, record)
+                            except V3TransactionError:
+                                # A concurrent sweep may have advanced the
+                                # document after this read.  Do not launch
+                                # again; the following sweep rereads the
+                                # durable record and either observes the bind
+                                # or safely retries this exact bind.
+                                outcomes.append((task.task_id, "WORKER_BINDING_RETRY_PENDING", record.execution_id))
+                                continue
                         elif record.launch_operation_id:
                             outcomes.append((task.task_id, "WORKER_LAUNCH_PENDING", record.launch_operation_id))
                             continue
@@ -141,3 +149,18 @@ class WorkerResultReconciler:
                 self._transaction.record_result(task, record, V3Status.EXECUTION_FAILED_FINAL)
                 outcomes.append((task.task_id, "WORKER_RESULT_PROCESSING_UNAVAILABLE_FINAL", record.execution_id))
         return outcomes
+
+    def _recover_execution(self, task: V3Task, record: ExecutionRecord) -> str | None:
+        """Resolve one accepted launch without ever creating another Worker.
+
+        The durable Cloud Run operation is the preferred proof.  If its read
+        is temporarily unavailable, a uniquely envelope-bound execution is an
+        equally narrow recovery proof.  Both paths are read-only and neither
+        can spend a second provider request.
+        """
+        if not record.launch_operation_id:
+            return self._worker.find_execution_for_task(task.task_id, task.spec.hash)
+        try:
+            return self._worker.execution_for_operation(record.launch_operation_id)
+        except CloudRunBootstrapClientError:
+            return self._worker.find_execution_for_task(task.task_id, task.spec.hash)
