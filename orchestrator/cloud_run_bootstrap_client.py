@@ -60,11 +60,17 @@ class CloudRunBootstrapClient:
         if not isinstance(operation_name, str) or not operation_name:
             raise CloudRunBootstrapClientError("cloud_run_operation_invalid")
         result = self._json(self._session.get(f"https://run.googleapis.com/v2/{operation_name}", timeout=30), "cloud_run_operation_failed")
-        if not result.get("done"):
-            return None
-        execution = (result.get("response") or {}).get("name")
+        # Cloud Run exposes the Execution resource in operation metadata as
+        # soon as the Job has accepted the launch.  Persisting that immutable
+        # identifier immediately lets a later Broker sweep observe the same
+        # Worker even when the long-running operation itself is still pending.
+        # The completed response remains a second, equivalent source.
+        execution = ((result.get("response") or {}).get("name")
+                     or (result.get("metadata") or {}).get("name"))
         if isinstance(execution, str) and execution.startswith(self._job_resource + "/executions/"):
             return execution.rsplit("/", 1)[1]
+        if not result.get("done"):
+            return None
         raise CloudRunBootstrapClientError("cloud_run_execution_invalid")
 
     def find_execution_for_task(self, task_id: str, spec_hash: str) -> str | None:

@@ -6,6 +6,7 @@ from artifact_handoff import ArtifactHandoff, InMemoryVerifiedArtifactStore
 from cloud_run_bootstrap_client import CloudRunBootstrapClientError
 from execution_platform import ExecutionRecord, TaskSpec, V3Status, V3Task
 from execution_result_adapter import RESULT_PREFIX
+from v3_transaction import V3TransactionError
 from worker_result_reconciler import WorkerResultReconciler
 
 
@@ -71,6 +72,40 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         self.assertEqual(reconciler.sweep(), [("task", "WORKER_RUNNING", "run-456")])
         self.assertEqual(task.execution.external_operation_id, "run-456")
         self.assertEqual(writes, ["bound"])
+
+    def test_completed_launch_falls_back_to_one_envelope_bound_execution(self):
+        task = running_task()
+        task.execution.external_operation_id = None
+        task.execution.launch_operation_id = "operations/123"
+        writes = []
+        tasks = type("Tasks", (), {"running": lambda _: [task]})()
+        transaction = type("Tx", (), {"record_external_operation": lambda *_: writes.append("bound"), "record_result": lambda *_: None})()
+        worker = type("Worker", (), {
+            "execution_for_operation": lambda *_: (_ for _ in ()).throw(CloudRunBootstrapClientError("cloud_run_operation_failed")),
+            "find_execution_for_task": lambda *_: "run-456",
+            "completion_state": lambda *_: "PENDING",
+        })()
+        logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
+        reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))
+
+        self.assertEqual(reconciler.sweep(), [("task", "WORKER_RUNNING", "run-456")])
+        self.assertEqual(task.execution.external_operation_id, "run-456")
+        self.assertEqual(writes, ["bound"])
+
+    def test_bind_conflict_is_retried_without_launching_another_worker(self):
+        task = running_task()
+        task.execution.external_operation_id = None
+        task.execution.launch_operation_id = "operations/123"
+        tasks = type("Tasks", (), {"running": lambda _: [task]})()
+        transaction = type("Tx", (), {
+            "record_external_operation": lambda *_: (_ for _ in ()).throw(V3TransactionError("v3_external_operation_not_recordable")),
+            "record_result": lambda *_: None,
+        })()
+        worker = type("Worker", (), {"execution_for_operation": lambda *_: "run-456"})()
+        logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
+        reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))
+
+        self.assertEqual(reconciler.sweep(), [("task", "WORKER_BINDING_RETRY_PENDING", "execution")])
 
     def test_malformed_artifact_fails_closed(self):
         task = running_task()

@@ -43,3 +43,10 @@ class CloudRunBootstrapClientTest(unittest.TestCase):
 
         self.assertEqual(client.start_operation(valid_envelope()), "operations/1")
         self.assertEqual(len(session.calls), 1)
+
+    def test_recovers_execution_from_pending_operation_metadata(self):
+        base = "projects/p/locations/us-central1/jobs/j"
+        session = Session([Response({"done": False, "metadata": {"name": base + "/executions/e-123"}})])
+        client = CloudRunBootstrapClient("p", "us-central1", "j", session=session)
+
+        self.assertEqual(client.execution_for_operation("operations/1"), "e-123")
