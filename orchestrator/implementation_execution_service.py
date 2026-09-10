@@ -100,13 +100,14 @@ class ImplementationExecutionService:
 
                 source_content = source.content if isinstance(source, SourceSnapshot) else source
                 baseline_paths = source.paths if isinstance(source, SourceSnapshot) else None
+                baseline_files = source.files if isinstance(source, SourceSnapshot) else None
                 payload = self._client.generate_artifact(
                     model=self._model, envelope=envelope, source_snapshot=source_content,
                     on_progress=progress,
                 )
                 self._handoff.receive_from_broker(
                     record.execution_id, envelope, payload,
-                    baseline_paths=baseline_paths,
+                    baseline_paths=baseline_paths, baseline_files=baseline_files,
                 )
             except OpenCodeImplementationError as exc:
                 self._fail(task, record, exc.code, outcomes)
