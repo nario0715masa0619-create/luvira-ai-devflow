@@ -42,5 +42,5 @@ class WorkerDispatchServiceTest(unittest.TestCase):
 
         with self.assertRaisesRegex(WorkerDispatcherError, "outcome_unknown"):
             service.dispatch("task", "execution")
-        self.assertEqual(task.status, V3Status.EXECUTION_RUNNING)
+        self.assertEqual(task.status, V3Status.WORKER_LAUNCH_ACCEPTED)
         self.assertIsNone(task.execution.external_operation_id)

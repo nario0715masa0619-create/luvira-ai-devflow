@@ -115,7 +115,7 @@ class FirestoreV3TaskStore:
 
     def running(self):
         """Read claimed executions for result reconciliation only."""
-        return self._with_status(V3Status.EXECUTION_RUNNING.value)
+        return self._with_status([V3Status.EXECUTION_RUNNING.value, V3Status.WORKER_LAUNCH_ACCEPTED.value])
 
     def worker_health_verified(self):
         """Tasks eligible for exactly one Broker-held implementation request."""

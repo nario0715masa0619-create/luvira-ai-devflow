@@ -130,7 +130,7 @@ class V3Transaction:
         resolves the operation to an execution id, so control-plane startup
         latency cannot strand or duplicate approved work.
         """
-        if (task.status is not V3Status.EXECUTION_RUNNING or task.execution is not record
+        if (task.status is not V3Status.WORKER_LAUNCH_ACCEPTED or task.execution is not record
                 or not isinstance(record.launch_operation_id, str) or not record.launch_operation_id
                 or record.external_operation_id is not None):
             raise V3TransactionError("launch_operation_invalid")
@@ -166,7 +166,7 @@ class V3Transaction:
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
-            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED}
+            if (stored.status not in {V3Status.WORKER_LAUNCH_ACCEPTED, V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED}
                     or stored.execution is None
                     or stored.execution.execution_id != record.execution_id
                     or stored.execution.external_operation_id != record.external_operation_id
