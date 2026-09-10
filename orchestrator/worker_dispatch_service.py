@@ -25,7 +25,6 @@ class TaskReader(Protocol):
 class ExecutionTransaction(Protocol):
     def begin_queued(self, task: V3Task, record: ExecutionRecord) -> None: ...
     def record_launch_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
-    def record_external_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
 
 
 class WorkerStarter(Protocol):
@@ -55,5 +54,6 @@ class WorkerDispatchService:
         if not isinstance(launch_operation_id, str) or not launch_operation_id:
             raise WorkerDispatcherError("worker_start_invalid")
         record.launch_operation_id = launch_operation_id
+        ExecutionPlatform.accept_worker_launch_existing(task, execution_id)
         self._transaction.record_launch_operation(task, record)
         return launch_operation_id

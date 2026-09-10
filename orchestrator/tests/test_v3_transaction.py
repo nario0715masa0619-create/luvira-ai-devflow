@@ -105,17 +105,40 @@ class V3TransactionTest(unittest.TestCase):
         self.transaction.update.assert_called_once()
         self.assertEqual(self.queued.revision, 2)
 
-    def test_records_external_execution_only_after_durable_claim(self):
-        running = V3Task("task", self.spec, V3Status.EXECUTION_RUNNING)
-        record = ExecutionRecord("execution", "task", self.spec.hash, 1, V3Status.EXECUTION_RUNNING, external_operation_id="run-1")
-        running.execution = record
-        stored = V3Task("task", self.spec, V3Status.EXECUTION_RUNNING)
-        stored.execution = ExecutionRecord("execution", "task", self.spec.hash, 1, V3Status.EXECUTION_RUNNING)
+    def test_records_identified_worker_only_after_accepted_launch(self):
+        identified = V3Task("task", self.spec, V3Status.WORKER_EXECUTION_IDENTIFIED)
+        record = ExecutionRecord("execution", "task", self.spec.hash, 1,
+                                 V3Status.WORKER_EXECUTION_IDENTIFIED,
+                                 external_operation_id="run-1",
+                                 launch_operation_id="operations/1")
+        identified.execution = record
+        stored = V3Task("task", self.spec, V3Status.WORKER_LAUNCH_ACCEPTED)
+        stored.execution = ExecutionRecord("execution", "task", self.spec.hash, 1,
+                                           V3Status.WORKER_LAUNCH_ACCEPTED,
+                                           launch_operation_id="operations/1")
         task_snapshot = Mock(exists=True)
         task_snapshot.to_dict.return_value = task_payload(stored)
         self.task_ref.get.return_value = task_snapshot
 
-        V3Transaction(self.client).record_external_operation(running, record)
+        V3Transaction(self.client).record_worker_execution_identified(identified, record)
 
         self.transaction.update.assert_called_once()
-        self.assertEqual(running.revision, 2)
+        self.assertEqual(identified.revision, 2)
+
+    def test_records_accepted_launch_as_one_durable_state_transition(self):
+        accepted = V3Task("task", self.spec, V3Status.WORKER_LAUNCH_ACCEPTED)
+        record = ExecutionRecord("execution", "task", self.spec.hash, 1,
+                                 V3Status.WORKER_LAUNCH_ACCEPTED,
+                                 launch_operation_id="operations/1")
+        accepted.execution = record
+        stored = V3Task("task", self.spec, V3Status.EXECUTION_RUNNING)
+        stored.execution = ExecutionRecord("execution", "task", self.spec.hash, 1,
+                                           V3Status.EXECUTION_RUNNING)
+        task_snapshot = Mock(exists=True)
+        task_snapshot.to_dict.return_value = task_payload(stored)
+        self.task_ref.get.return_value = task_snapshot
+
+        V3Transaction(self.client).record_launch_operation(accepted, record)
+
+        self.transaction.update.assert_called_once()
+        self.assertEqual(accepted.revision, 2)

@@ -10,15 +10,31 @@ from v3_transaction import V3TransactionError
 from worker_result_reconciler import WorkerResultReconciler
 
 
-def running_task():
+def identified_task():
     spec = TaskSpec.from_dict({
         "repository": "a/b", "base_commit": "a" * 40,
         "requested_action": "implementation", "acceptance_criteria": ["test"],
         "budget": {"max_cost_usd": 1}, "expiry": "2026-12-01T00:00:00Z",
         "execution_scope": {"allowed_paths": ["src/"]}, "model_policy": "low-cost",
     })
-    record = ExecutionRecord("execution", "task", spec.hash, 1, V3Status.EXECUTION_RUNNING, external_operation_id="run-123")
-    return V3Task("task", spec, V3Status.EXECUTION_RUNNING, execution=record)
+    record = ExecutionRecord("execution", "task", spec.hash, 1, V3Status.WORKER_EXECUTION_IDENTIFIED, external_operation_id="run-123", launch_operation_id="operations/123")
+    return V3Task("task", spec, V3Status.WORKER_EXECUTION_IDENTIFIED, execution=record)
+
+
+def accepted_task():
+    task = identified_task()
+    task.status = V3Status.WORKER_LAUNCH_ACCEPTED
+    task.execution.status = V3Status.WORKER_LAUNCH_ACCEPTED
+    task.execution.external_operation_id = None
+    return task
+
+
+def legacy_running_task():
+    task = accepted_task()
+    task.status = V3Status.EXECUTION_RUNNING
+    task.execution.status = V3Status.EXECUTION_RUNNING
+    task.execution.launch_operation_id = None
+    return task
 
 
 def artifact_line(task):
@@ -33,38 +49,35 @@ class WorkerResultReconcilerTest(unittest.TestCase):
     def reconciler(self, task, state, stdout=""):
         writes = []
         tasks = type("Tasks", (), {"running": lambda _: [task]})()
-        transaction = type("Tx", (), {"record_external_operation": lambda *_: None, "record_result": lambda _, current, record, status: writes.append((current.status, status))})()
+        transaction = type("Tx", (), {"record_worker_execution_identified": lambda *_: None, "record_result": lambda _, current, record, status: writes.append((current.status, status))})()
         worker = type("Worker", (), {"find_execution_for_task": lambda *_: None, "completion_state": lambda _, __: state})()
         logs = type("Logs", (), {"read_stdout": lambda _, __: stdout})()
         return WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore())), writes
 
     def test_completed_worker_is_verified_without_restarting_it(self):
-        task = running_task()
+        task = identified_task()
         reconciler, writes = self.reconciler(task, "SUCCEEDED", artifact_line(task))
         self.assertEqual(reconciler.sweep(), [("task", "WORKER_HEALTH_VERIFIED", "run-123")])
         self.assertEqual(writes, [(V3Status.WORKER_HEALTH_VERIFIED, V3Status.WORKER_HEALTH_VERIFIED)])
 
     def test_failed_bootstrap_worker_is_safely_queued_for_a_new_attempt(self):
-        task = running_task()
+        task = identified_task()
         reconciler, writes = self.reconciler(task, "FAILED")
         self.assertEqual(reconciler.sweep(), [("task", "WORKER_FAILED_RETRYABLE", "execution")])
         self.assertEqual(writes, [(V3Status.EXECUTION_FAILED_RETRYABLE, V3Status.EXECUTION_FAILED_RETRYABLE)])
 
     def test_unaccepted_worker_start_is_safely_requeued(self):
-        task = running_task()
-        task.execution.external_operation_id = None
+        task = legacy_running_task()
         reconciler, writes = self.reconciler(task, "PENDING")
         self.assertEqual(reconciler.sweep(), [("task", "WORKER_DISPATCH_RETRYABLE", "execution")])
         self.assertEqual(task.execution.failure_code, "WORKER_DISPATCH_NOT_ACCEPTED_RETRYABLE")
         self.assertEqual(writes, [(V3Status.EXECUTION_FAILED_RETRYABLE, V3Status.EXECUTION_FAILED_RETRYABLE)])
 
     def test_launch_operation_is_reconciled_without_searching_for_a_duplicate(self):
-        task = running_task()
-        task.execution.external_operation_id = None
-        task.execution.launch_operation_id = "operations/123"
+        task = accepted_task()
         writes = []
         tasks = type("Tasks", (), {"running": lambda _: [task]})()
-        transaction = type("Tx", (), {"record_external_operation": lambda *_: writes.append("bound"), "record_result": lambda *_: None})()
+        transaction = type("Tx", (), {"record_worker_execution_identified": lambda *_: writes.append("bound"), "record_result": lambda *_: None})()
         worker = type("Worker", (), {"execution_for_operation": lambda _, __: "run-456", "completion_state": lambda *_: "PENDING"})()
         logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
         reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))
@@ -74,12 +87,10 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         self.assertEqual(writes, ["bound"])
 
     def test_known_launch_does_not_search_historical_executions_after_a_read_failure(self):
-        task = running_task()
-        task.execution.external_operation_id = None
-        task.execution.launch_operation_id = "operations/123"
+        task = accepted_task()
         writes = []
         tasks = type("Tasks", (), {"running": lambda _: [task]})()
-        transaction = type("Tx", (), {"record_external_operation": lambda *_: writes.append("bound"), "record_result": lambda *_: None})()
+        transaction = type("Tx", (), {"record_worker_execution_identified": lambda *_: writes.append("bound"), "record_result": lambda *_: None})()
         worker = type("Worker", (), {
             "execution_for_operation": lambda *_: (_ for _ in ()).throw(CloudRunBootstrapClientError("cloud_run_operation_failed")),
             "find_execution_for_task": lambda *_: self.fail("known launch must not use historical search"),
@@ -92,27 +103,23 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         self.assertEqual(writes, [])
 
     def test_known_launch_with_ambiguous_history_remains_pending_without_retry(self):
-        task = running_task()
-        task.execution.external_operation_id = None
-        task.execution.launch_operation_id = "operations/123"
+        task = accepted_task()
         writes = []
         tasks = type("Tasks", (), {"running": lambda _: [task]})()
-        transaction = type("Tx", (), {"record_external_operation": lambda *_: writes.append("bound"), "record_result": lambda *_: writes.append("result")})()
+        transaction = type("Tx", (), {"record_worker_execution_identified": lambda *_: writes.append("bound"), "record_result": lambda *_: writes.append("result")})()
         worker = type("Worker", (), {"execution_for_operation": lambda *_: (_ for _ in ()).throw(CloudRunBootstrapClientError("cloud_run_execution_ambiguous"))})()
         logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
         reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))
 
         self.assertEqual(reconciler.sweep(), [("task", "WORKER_LAUNCH_RECOVERY_PENDING", "operations/123")])
-        self.assertEqual(task.status, V3Status.EXECUTION_RUNNING)
+        self.assertEqual(task.status, V3Status.WORKER_LAUNCH_ACCEPTED)
         self.assertEqual(writes, [])
 
     def test_bind_conflict_is_retried_without_launching_another_worker(self):
-        task = running_task()
-        task.execution.external_operation_id = None
-        task.execution.launch_operation_id = "operations/123"
+        task = accepted_task()
         tasks = type("Tasks", (), {"running": lambda _: [task]})()
         transaction = type("Tx", (), {
-            "record_external_operation": lambda *_: (_ for _ in ()).throw(V3TransactionError("v3_external_operation_not_recordable")),
+            "record_worker_execution_identified": lambda *_: (_ for _ in ()).throw(V3TransactionError("v3_worker_execution_identity_not_recordable")),
             "record_result": lambda *_: None,
         })()
         worker = type("Worker", (), {"execution_for_operation": lambda *_: "run-456"})()
@@ -122,18 +129,17 @@ class WorkerResultReconcilerTest(unittest.TestCase):
         self.assertEqual(reconciler.sweep(), [("task", "WORKER_BINDING_RETRY_PENDING", "execution")])
 
     def test_malformed_artifact_fails_closed(self):
-        task = running_task()
+        task = identified_task()
         reconciler, writes = self.reconciler(task, "SUCCEEDED", "not an artifact")
         self.assertEqual(reconciler.sweep(), [("task", "worker_bootstrap_artifact_missing_or_ambiguous", "execution")])
         self.assertEqual(task.execution.failure_code, "worker_bootstrap_artifact_missing_or_ambiguous")
         self.assertEqual(writes, [(V3Status.EXECUTION_FAILED_FINAL, V3Status.EXECUTION_FAILED_FINAL)])
 
     def test_legacy_ambiguous_worker_launch_is_safely_retried(self):
-        task = running_task()
-        task.execution.external_operation_id = None
+        task = legacy_running_task()
         writes = []
         tasks = type("Tasks", (), {"running": lambda _: [task]})()
-        transaction = type("Tx", (), {"record_external_operation": lambda *_: None, "record_result": lambda *_: writes.append(task.status)})()
+        transaction = type("Tx", (), {"record_worker_execution_identified": lambda *_: None, "record_result": lambda *_: writes.append(task.status)})()
         worker = type("Worker", (), {"find_execution_for_task": lambda *_: (_ for _ in ()).throw(CloudRunBootstrapClientError("cloud_run_execution_ambiguous"))})()
         logs = type("Logs", (), {"read_stdout": lambda *_: ""})()
         reconciler = WorkerResultReconciler(tasks, transaction, worker, logs, ArtifactHandoff(InMemoryVerifiedArtifactStore()))

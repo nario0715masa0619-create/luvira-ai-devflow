@@ -96,13 +96,18 @@ class V3Transaction:
         self._run_transaction(write)
         task.revision += 1
 
-    def record_external_operation(self, task: V3Task, record: ExecutionRecord) -> None:
-        """Bind the Cloud Run execution id to the already claimed task."""
-        if (task.status is not V3Status.EXECUTION_RUNNING
+    def record_worker_execution_identified(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Atomically persist the resolved Worker execution identity.
+
+        A new launch comes from ``WORKER_LAUNCH_ACCEPTED``.  The RUNNING
+        predecessor is a narrowly-scoped migration path for records persisted
+        before launch-operation IDs were introduced.
+        """
+        if (task.status is not V3Status.WORKER_EXECUTION_IDENTIFIED
                 or task.execution is not record
                 or not isinstance(record.external_operation_id, str)
                 or not record.external_operation_id):
-            raise V3TransactionError("external_operation_invalid")
+            raise V3TransactionError("worker_execution_identity_invalid")
         task_ref = self.tasks.document(task.task_id)
 
         def write(transaction: Any) -> None:
@@ -110,12 +115,13 @@ class V3Transaction:
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
-            if (stored.status is not V3Status.EXECUTION_RUNNING
+            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.WORKER_LAUNCH_ACCEPTED}
                     or stored.execution is None
                     or stored.execution.execution_id != record.execution_id
-                    or stored.execution.external_operation_id is not None
+                    or (stored.execution.external_operation_id is not None
+                        and stored.execution.external_operation_id != record.external_operation_id)
                     or stored.revision != task.revision):
-                raise V3TransactionError("v3_external_operation_not_recordable")
+                raise V3TransactionError("v3_worker_execution_identity_not_recordable")
             payload = task_payload(task)
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
@@ -130,7 +136,7 @@ class V3Transaction:
         resolves the operation to an execution id, so control-plane startup
         latency cannot strand or duplicate approved work.
         """
-        if (task.status is not V3Status.EXECUTION_RUNNING or task.execution is not record
+        if (task.status is not V3Status.WORKER_LAUNCH_ACCEPTED or task.execution is not record
                 or not isinstance(record.launch_operation_id, str) or not record.launch_operation_id
                 or record.external_operation_id is not None):
             raise V3TransactionError("launch_operation_invalid")
@@ -166,7 +172,8 @@ class V3Transaction:
             if not snapshot.exists:
                 raise V3TransactionError("v3_task_not_found")
             stored = task_from_payload(snapshot.to_dict())
-            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED}
+            if (stored.status not in {V3Status.EXECUTION_RUNNING, V3Status.WORKER_EXECUTION_IDENTIFIED,
+                                      V3Status.IMPLEMENTATION_GENERATING, V3Status.WORKER_HEALTH_VERIFIED}
                     or stored.execution is None
                     or stored.execution.execution_id != record.execution_id
                     or stored.execution.external_operation_id != record.external_operation_id

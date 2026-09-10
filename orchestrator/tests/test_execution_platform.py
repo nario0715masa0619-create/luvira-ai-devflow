@@ -94,3 +94,29 @@ class ExecutionPlatformTest(unittest.TestCase):
         self.assertEqual(task.status, V3Status.EXECUTION_RUNNING)
         with self.assertRaisesRegex(TransitionRejected, "invalid_transition"):
             ExecutionPlatform.begin_existing(task, execution.execution_id)
+
+    def test_worker_launch_must_be_identified_before_health_verification(self):
+        platform, task = self.authorized()
+        execution = platform.queue(task.task_id, [True])
+        ExecutionPlatform.begin_existing(task, execution.execution_id)
+        execution.launch_operation_id = "operations/123"
+        ExecutionPlatform.accept_worker_launch_existing(task, execution.execution_id)
+
+        with self.assertRaisesRegex(TransitionRejected, "invalid_transition"):
+            ExecutionPlatform.verify_worker_health_existing(task, execution.execution_id)
+
+        execution.external_operation_id = "run-123"
+        ExecutionPlatform.identify_worker_execution_existing(task, execution.execution_id)
+        ExecutionPlatform.verify_worker_health_existing(task, execution.execution_id)
+
+        self.assertEqual(task.status, V3Status.WORKER_HEALTH_VERIFIED)
+
+    def test_accepted_launch_cannot_be_returned_to_retryable_failure(self):
+        platform, task = self.authorized()
+        execution = platform.queue(task.task_id, [True])
+        ExecutionPlatform.begin_existing(task, execution.execution_id)
+        execution.launch_operation_id = "operations/123"
+        ExecutionPlatform.accept_worker_launch_existing(task, execution.execution_id)
+
+        with self.assertRaisesRegex(TransitionRejected, "invalid_transition"):
+            ExecutionPlatform.fail_existing(task, execution.execution_id, "WORKER_TIMEOUT_RETRYABLE")
