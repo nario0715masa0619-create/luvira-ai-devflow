@@ -1,4 +1,5 @@
 import json
+import base64
 import unittest
 
 from opencode_implementation_client import OpenCodeImplementationClient, OpenCodeImplementationError
@@ -18,9 +19,13 @@ class Response:
 
 
 def artifact_events():
+    payload = json.dumps({
+        "schema": "luvira.devflow.implementation-artifact.v1",
+        "diff": "--- a/src/example.py\n+++ b/src/example.py\n@@ -1 +1 @@\n-old\n+new\n",
+    })
     return [
-        {"choices": [{"delta": {"content": '{\"schema\":'}}]},
-        {"choices": [{"delta": {"content": ' \"luvira.devflow.implementation-artifact.v1\"}'}}]},
+        {"choices": [{"delta": {"content": payload[:20]}}]},
+        {"choices": [{"delta": {"content": payload[20:]}}]},
         "[DONE]",
     ]
 
@@ -35,6 +40,7 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         client = OpenCodeImplementationClient(api_key, transport)
         result = client.generate_artifact(model="kimi-k2.6", envelope={"task_id":"t","spec_hash":"a" * 64,"base_commit":"b" * 40,"allowed_paths":["src/"],"acceptance_criteria":["test"]}, source_snapshot=b"x")
         self.assertEqual(json.loads(result)["schema"], "luvira.devflow.implementation-artifact.v1")
+        self.assertEqual(base64.b64decode(json.loads(result)["diff_b64"]), b"--- a/src/example.py\n+++ b/src/example.py\n@@ -1 +1 @@\n-old\n+new\n")
         self.assertEqual(calls[0][1], 120)
         self.assertNotIn(api_key.encode(), calls[0][0].data)
         request_body = json.loads(calls[0][0].data)
@@ -42,7 +48,7 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         self.assertEqual(request_body["response_format"], {"type": "json_object"})
         self.assertEqual(calls[0][0].get_header("X-opencode-session"), "luvira-0d9907cf80722b6e7d79ddfcc4ec1ba4")
         prompt = json.loads(request_body["messages"][0]["content"])
-        self.assertTrue(any("diff_b64" in rule for rule in prompt["artifact_rules"]))
+        self.assertTrue(any("never base64" in rule for rule in prompt["artifact_rules"]))
         self.assertTrue(any("GitHub CI is the merge gate" in rule for rule in prompt["artifact_rules"]))
 
     def test_session_id_is_stable_for_the_same_approved_task(self):
@@ -83,11 +89,11 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
 
     def test_accepts_only_a_complete_json_fence_as_a_compatibility_fallback(self):
         events = [
-            {"choices": [{"delta": {"content": "```json\\n{\\\"schema\\\": \\\"luvira.devflow.implementation-artifact.v1\\\"}\\n```"}}]},
+            {"choices": [{"delta": {"content": "```json\\n{\\\"schema\\\": \\\"luvira.devflow.implementation-artifact.v1\\\", \\\"diff\\\": \\\"--- a/src/example.py\\\\n+++ b/src/example.py\\\\n@@ -1 +1 @@\\\\n-old\\\\n+new\\\\n\\\"}\\n```"}}]},
             "[DONE]",
         ]
         events = [
-            {"choices": [{"delta": {"content": "```json" + chr(10) + '{"schema":"luvira.devflow.implementation-artifact.v1"}' + chr(10) + "```"}}]},
+            {"choices": [{"delta": {"content": "```json" + chr(10) + '{"schema":"luvira.devflow.implementation-artifact.v1","diff":"--- a/src/example.py\\n+++ b/src/example.py\\n@@ -1 +1 @@\\n-old\\n+new\\n"}' + chr(10) + "```"}}]},
             "[DONE]",
         ]
         client = OpenCodeImplementationClient("secret", lambda *_, **__: Response(events))
