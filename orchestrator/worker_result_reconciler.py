@@ -18,7 +18,7 @@ class RunningTaskReader(Protocol):
 
 class ResultTransaction(Protocol):
     def record_launch_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
-    def record_external_operation(self, task: V3Task, record: ExecutionRecord) -> None: ...
+    def record_worker_execution_identified(self, task: V3Task, record: ExecutionRecord) -> None: ...
     def record_result(self, task: V3Task, record: ExecutionRecord, expected_status: V3Status) -> None: ...
 
 
@@ -54,8 +54,9 @@ class WorkerResultReconciler:
                         recovered = self._recover_execution(task, record)
                         if recovered:
                             record.external_operation_id = recovered
+                            ExecutionPlatform.identify_worker_execution_existing(task, record.execution_id)
                             try:
-                                self._transaction.record_external_operation(task, record)
+                                self._transaction.record_worker_execution_identified(task, record)
                             except V3TransactionError:
                                 # A concurrent sweep may have advanced the
                                 # document after this read.  Do not launch
@@ -67,7 +68,7 @@ class WorkerResultReconciler:
                         elif record.launch_operation_id:
                             outcomes.append((task.task_id, "WORKER_LAUNCH_PENDING", record.launch_operation_id))
                             continue
-                        else:
+                        elif task.status is V3Status.EXECUTION_RUNNING:
                             # The Worker API never accepted a matching
                             # execution.  Retrying is safe: no isolated
                             # Worker ran, so no provider call, source write,
@@ -84,8 +85,13 @@ class WorkerResultReconciler:
                             )
                             outcomes.append((task.task_id, "WORKER_DISPATCH_RETRYABLE", record.execution_id))
                             continue
+                        else:
+                            outcomes.append((task.task_id, "WORKER_LAUNCH_RECOVERY_PENDING", record.execution_id))
+                            continue
                     except CloudRunBootstrapClientError as exc:
-                        if str(exc) == "cloud_run_execution_ambiguous" and not record.launch_operation_id:
+                        if (str(exc) == "cloud_run_execution_ambiguous"
+                                and not record.launch_operation_id
+                                and task.status is V3Status.EXECUTION_RUNNING):
                             # This recovery path is only for records created
                             # before launch-operation persistence existed.  The
                             # isolated Worker has no provider, source-write,

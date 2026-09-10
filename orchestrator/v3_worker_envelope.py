@@ -11,7 +11,11 @@ class V3WorkerEnvelopeError(ValueError):
 
 def from_running_task(task: V3Task) -> dict:
     """Build the only Worker input; no Issue body, token, or provider key."""
-    if task.status is not V3Status.EXECUTION_RUNNING or task.execution is None:
+    if task.status not in {
+            V3Status.EXECUTION_RUNNING,
+            V3Status.WORKER_LAUNCH_ACCEPTED,
+            V3Status.WORKER_EXECUTION_IDENTIFIED,
+    } or task.execution is None:
         raise V3WorkerEnvelopeError("execution_not_running")
     if task.execution.spec_hash != task.spec.hash:
         raise V3WorkerEnvelopeError("execution_spec_binding_invalid")

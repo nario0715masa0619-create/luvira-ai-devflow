@@ -22,7 +22,6 @@ class WorkerDispatchServiceTest(unittest.TestCase):
         transaction = type("Transaction", (), {
             "begin_queued": lambda _, current, record: calls.append(("claim", current.status, record.status)),
             "record_launch_operation": lambda _, current, record: calls.append(("launch", record.launch_operation_id)),
-            "record_external_operation": lambda _, current, record: calls.append(("bind", record.external_operation_id)),
         })()
         worker = type("Worker", (), {"start_operation": lambda _, envelope: calls.append(("start", envelope)) or "operations/123"})()
         service = WorkerDispatchService(type("Tasks", (), {"get": lambda _, __: task})(), transaction, worker)
@@ -37,7 +36,7 @@ class WorkerDispatchServiceTest(unittest.TestCase):
 
     def test_start_failure_does_not_requeue_or_duplicate_work(self):
         task = queued_task()
-        transaction = type("Transaction", (), {"begin_queued": lambda *args: None, "record_launch_operation": lambda *args: None, "record_external_operation": lambda *args: None})()
+        transaction = type("Transaction", (), {"begin_queued": lambda *args: None, "record_launch_operation": lambda *args: None})()
         worker = type("Worker", (), {"start_operation": lambda *_: (_ for _ in ()).throw(TimeoutError())})()
         service = WorkerDispatchService(type("Tasks", (), {"get": lambda _, __: task})(), transaction, worker)
 
