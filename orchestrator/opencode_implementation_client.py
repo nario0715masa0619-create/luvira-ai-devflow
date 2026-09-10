@@ -8,6 +8,7 @@ to the verifier without logging provider content.
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import socket
 import time
@@ -48,12 +49,12 @@ def _prompt(envelope: dict[str, Any], source: str) -> str:
             "spec_hash": envelope["spec_hash"],
             "base_commit": envelope["base_commit"],
             "allowed_paths": envelope["allowed_paths"],
-            "required_fields": ["schema", "task_id", "spec_hash", "base_commit", "diff_b64", "changed_paths", "tests", "publication"],
+            "required_fields": ["schema", "task_id", "spec_hash", "base_commit", "diff", "changed_paths", "tests", "publication"],
         },
         "acceptance_criteria": envelope["acceptance_criteria"],
         "artifact_rules": [
             "Return a JSON object with exactly the contract.required_fields plus schema and publication; do not omit or add fields.",
-            "diff_b64 must be base64 for a non-empty UTF-8 unified diff. Every changed file must have consecutive --- a/path and +++ b/path headers.",
+            "diff must be a non-empty UTF-8 unified diff as a JSON string, never base64. Every changed file must have consecutive --- a/path and +++ b/path headers.",
             "changed_paths must be the sorted unique paths from the +++ diff headers, and every path must be within allowed_paths.",
             "tests must be an array of {name,status}; status is only passed or skipped. Leave it empty unless a result is actually available; GitHub CI is the merge gate.",
             "Do not change protected paths, include secrets, use /dev/null paths, or include prose outside the JSON object.",
@@ -112,7 +113,7 @@ class OpenCodeImplementationClient:
         except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
             raise OpenCodeImplementationError("OPENCODE_PROTOCOL_FINAL") from exc
         try:
-            artifact = self._decode_artifact(content)
+            artifact = self._verifier_artifact(self._decode_artifact(content))
         except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
             # A completed stream with a non-JSON artifact is a provider
             # output failure, not a permanently invalid approved task.  The
@@ -131,6 +132,22 @@ class OpenCodeImplementationClient:
             if not (stripped.startswith("```json\n") and stripped.endswith("\n```")):
                 raise direct_error
             return json.loads(stripped[len("```json\n"):-len("\n```")])
+
+    @staticmethod
+    def _verifier_artifact(artifact: Any) -> dict[str, Any]:
+        """Convert the model's readable diff into the verifier-only envelope.
+
+        Base64 is a transport encoding, not an implementation task.  Keeping
+        that transformation in the Broker removes an error-prone generation
+        step while preserving the immutable verifier contract.
+        """
+        if not isinstance(artifact, dict) or "diff_b64" in artifact:
+            raise ValueError("artifact_shape_invalid")
+        diff = artifact.pop("diff", None)
+        if not isinstance(diff, str) or not diff:
+            raise ValueError("artifact_diff_invalid")
+        artifact["diff_b64"] = base64.b64encode(diff.encode("utf-8")).decode("ascii")
+        return artifact
 
     def _read_stream(self, response, on_progress: Callable[[int], None] | None) -> str:
         """Read OpenAI-compatible SSE and retain only the resulting artifact."""
