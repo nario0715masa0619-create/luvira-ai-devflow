@@ -2,10 +2,19 @@ import unittest
 
 from execution_platform import ExecutionRecord, TaskSpec, V3Status, V3Task
 from github_verified_publisher import VerifiedPublicationError
-from verified_publication_service import VerifiedPublicationService
+from verified_publication_service import VerifiedPublicationService, publication_text
 
 
 class VerifiedPublicationServiceTest(unittest.TestCase):
+    def test_uses_japanese_metadata_for_an_implementation_pr(self):
+        self.assertEqual(
+            publication_text("implementation"),
+            ("Luvira: 実装成果物", "承認済みタスクから生成・検証された実装成果物です。独立レビューと人による確認後にマージしてください。"),
+        )
+
+    def test_uses_japanese_fallback_metadata(self):
+        self.assertEqual(publication_text("other")[0], "Luvira: 承認済み成果物")
+
     def test_base_mismatch_becomes_one_terminal_result(self):
         spec = TaskSpec.from_dict({
             "repository": "a/b", "base_commit": "a" * 40, "requested_action": "implementation",
