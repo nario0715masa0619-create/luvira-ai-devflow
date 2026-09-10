@@ -16,6 +16,25 @@ FINAL_PUBLICATION_CODES = frozenset({
     "publication_patch_not_utf8",
 })
 
+PUBLICATION_TEXT = {
+    "implementation": (
+        "Luvira: 実装成果物",
+        "承認済みタスクから生成・検証された実装成果物です。独立レビューと人による確認後にマージしてください。",
+    ),
+    "validation": (
+        "Luvira: 検証結果",
+        "承認済みタスクから生成・検証された結果です。人による確認後にマージしてください。",
+    ),
+}
+
+
+def publication_text(requested_action: str) -> tuple[str, str]:
+    """Keep generated PR metadata human-readable in the repository language."""
+    return PUBLICATION_TEXT.get(
+        requested_action,
+        ("Luvira: 承認済み成果物", "承認済みタスクから生成・検証された成果物です。人による確認後にマージしてください。"),
+    )
+
 
 class VerifiedPublicationService:
     def __init__(self, tasks, transaction, artifacts, publisher_for_task):
@@ -30,11 +49,11 @@ class VerifiedPublicationService:
                 outcomes.append((task.task_id, "PUBLICATION_STATE_INVALID", None)); continue
             try:
                 artifact = self._artifacts.get(record.execution_id).artifact
+                title, body = publication_text(task.spec.requested_action)
                 url = self._publisher_for_task(task).publish(
                     task_id=task.task_id, execution_id=record.execution_id,
                     base_commit=artifact.base_commit, diff=artifact.diff,
-                    title=f"Luvira: {task.spec.requested_action}",
-                    body="Generated from an approved task. Draft PR; human review and merge remain required.",
+                    title=title, body=body,
                 )
                 ExecutionPlatform.publish_existing(task, record.execution_id)
                 self._transaction.record_publication(task, record)

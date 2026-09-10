@@ -173,7 +173,11 @@ class GitHubVerifiedPublisher:
                 if sha is not None:
                     body_value["sha"] = sha
                 self._call("PUT", f"/repos/{repo}/contents/{quote(target, safe='/')}", body_value)
-        pull = self._call("POST", f"/repos/{repo}/pulls", {"title": title, "head": branch, "base": "main", "body": body, "draft": True})
+        # The verified artifact has already passed the immutable-base and
+        # scope checks.  Open it ready for review so the independent reviewer
+        # actually runs; branch protection and the human merge decision still
+        # prevent publication to main.
+        pull = self._call("POST", f"/repos/{repo}/pulls", {"title": title, "head": branch, "base": "main", "body": body, "draft": False})
         url = pull.get("html_url")
         if not isinstance(url, str) or not url:
             raise VerifiedPublicationError("publication_pull_invalid")
