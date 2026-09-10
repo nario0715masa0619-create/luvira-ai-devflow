@@ -110,11 +110,13 @@ class ImplementationArtifactHandoff:
         self._store = store
 
     def receive_from_broker(self, execution_id: str, envelope: dict, payload: bytes,
-                            *, baseline_paths=None) -> VerifiedImplementationArtifactRecord:
+                            *, baseline_paths=None, baseline_files=None) -> VerifiedImplementationArtifactRecord:
         if not isinstance(execution_id, str) or not execution_id:
             raise ImplementationArtifactHandoffError("implementation_execution_id_invalid")
         try:
-            artifact = verify_implementation_artifact(payload, envelope, baseline_paths=baseline_paths)
+            artifact = verify_implementation_artifact(
+                payload, envelope, baseline_paths=baseline_paths, baseline_files=baseline_files,
+            )
         except ImplementationArtifactError as exc:
             # Persist only the verifier code, never the model response or
             # source snapshot.  Operators can distinguish a contract mismatch

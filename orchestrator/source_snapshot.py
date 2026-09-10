@@ -20,6 +20,10 @@ class SourceSnapshot:
     base_commit: str
     content: bytes
     paths: tuple[str, ...]
+    # The exact immutable blobs behind ``content``.  The presentation given to
+    # the model remains compact text, while verification can apply its diff to
+    # these bytes before an artifact is ever made durable.
+    files: tuple[tuple[str, bytes], ...]
 
 
 def _allowed(path: str, prefixes: tuple[str, ...]) -> bool:
@@ -43,6 +47,7 @@ class SourceSnapshotBuilder:
         if not selected or len(selected) > MAX_FILES:
             raise SourceSnapshotError("source_snapshot_scope_invalid")
         chunks = []
+        files = []
         total = 0
         for path, sha in sorted(selected):
             blob = self._read_blob(sha)
@@ -62,4 +67,8 @@ class SourceSnapshotBuilder:
             if total > MAX_SNAPSHOT_BYTES:
                 raise SourceSnapshotError("source_snapshot_too_large")
             chunks.append(f"--- {path}\n{text}\n")
-        return SourceSnapshot(base_commit, "".join(chunks).encode("utf-8"), tuple(path for path, _ in sorted(selected)))
+            files.append((path, content))
+        return SourceSnapshot(
+            base_commit, "".join(chunks).encode("utf-8"),
+            tuple(path for path, _ in sorted(selected)), tuple(files),
+        )
