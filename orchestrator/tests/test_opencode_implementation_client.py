@@ -131,6 +131,16 @@ class OpenCodeImplementationClientTest(unittest.TestCase):
         )
         self.assertEqual(json.loads(result)["schema"], "luvira.devflow.implementation-artifact.v1")
 
+    def test_accepts_eof_after_complete_artifact_without_done_frame(self):
+        client = OpenCodeImplementationClient("secret", lambda *_, **__: Response(artifact_events()[:-1]))
+        result = client.generate_artifact(
+            model="kimi-k2.6",
+            envelope={"task_id":"t", "spec_hash":"a" * 64, "base_commit":"b" * 40,
+                      "allowed_paths":["src/"], "acceptance_criteria":["test"]},
+            source_snapshot=b"x",
+        )
+        self.assertEqual(json.loads(result)["schema"], "luvira.devflow.implementation-artifact.v1")
+
     def test_accepts_only_a_complete_json_fence_as_a_compatibility_fallback(self):
         events = [
             {"choices": [{"delta": {"content": "```json\\n{\\\"schema\\\": \\\"luvira.devflow.implementation-artifact.v1\\\", \\\"diff\\\": \\\"--- a/src/example.py\\\\n+++ b/src/example.py\\\\n@@ -1 +1 @@\\\\n-old\\\\n+new\\\\n\\\"}\\n```"}}]},
