@@ -294,9 +294,13 @@ def github_worker_readiness():
     if installation.get("id") != int(installation_id) or not isinstance(account, str):
         logging.warning("GITHUB_WORKER_BLOCKED installation identity mismatch")
         return jsonify(status="BLOCKED", reason="github_worker_identity_mismatch"), 503
+    if (installation.get("permissions") or {}).get("issues") != "write":
+        logging.warning("GITHUB_WORKER_BLOCKED incident permission is not configured")
+        return jsonify(status="BLOCKED", reason="github_worker_issues_write_required"), 503
 
     logging.info("GITHUB_WORKER_READY installation_id=%s account=%s", installation_id, account)
-    return jsonify(status="READY", provider="github-worker", installation_id=int(installation_id), account=account)
+    return jsonify(status="READY", provider="github-worker", installation_id=int(installation_id), account=account,
+                   incident_alerting="issues-write")
 
 
 @app.post("/worker/eligibility")
@@ -526,7 +530,9 @@ def github_worker_identity_available():
     installation = github_worker_installation(app_id, installation_id, private_key)
     account = (installation.get("account") or {}).get("login")
     expected_account = EXPECTED_REPOSITORY.split("/", 1)[0]
-    return installation.get("id") == int(installation_id) and account == expected_account
+    return (installation.get("id") == int(installation_id)
+            and account == expected_account
+            and (installation.get("permissions") or {}).get("issues") == "write")
 
 
 def create_runtime_incident(checks):

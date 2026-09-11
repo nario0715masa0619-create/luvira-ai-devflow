@@ -159,11 +159,11 @@ class EventTest(unittest.TestCase):
             "GITHUB_WORKER_INSTALLATION_ID": "158901090",
             "GITHUB_WORKER_PRIVATE_KEY": "test-key",
         }
-        installation = {"id": 158901090, "account": {"login": "nario0715masa0619-create"}}
+        installation = {"id": 158901090, "account": {"login": "nario0715masa0619-create"}, "permissions": {"issues": "write"}}
         with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value=installation) as verify:
             response = self.client.get("/readiness/github-worker")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json, {"status": "READY", "provider": "github-worker", "installation_id": 158901090, "account": "nario0715masa0619-create"})
+        self.assertEqual(response.json, {"status": "READY", "provider": "github-worker", "installation_id": 158901090, "account": "nario0715masa0619-create", "incident_alerting": "issues-write"})
         verify.assert_called_once_with("4823016", "158901090", "test-key")
 
     def test_github_worker_readiness_blocks_without_configuration(self):
@@ -178,10 +178,22 @@ class EventTest(unittest.TestCase):
             "GITHUB_WORKER_INSTALLATION_ID": "158901090",
             "GITHUB_WORKER_PRIVATE_KEY": "test-key",
         }
-        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value={"id": 158901090, "account": {"login": "other"}}):
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value={"id": 158901090, "account": {"login": "other"}, "permissions": {"issues": "write"}}):
             self.assertFalse(main.github_worker_identity_available())
-        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value={"id": 158901090, "account": {"login": "nario0715masa0619-create"}}):
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value={"id": 158901090, "account": {"login": "nario0715masa0619-create"}, "permissions": {"issues": "write"}}):
             self.assertTrue(main.github_worker_identity_available())
+
+    def test_github_worker_readiness_blocks_without_incident_write_permission(self):
+        configured = {
+            "GITHUB_WORKER_APP_ID": "4823016",
+            "GITHUB_WORKER_INSTALLATION_ID": "158901090",
+            "GITHUB_WORKER_PRIVATE_KEY": "test-key",
+        }
+        installation = {"id": 158901090, "account": {"login": "nario0715masa0619-create"}, "permissions": {"issues": "read"}}
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value=installation):
+            response = self.client.get("/readiness/github-worker")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json["reason"], "github_worker_issues_write_required")
 
     def test_runtime_incident_uses_only_failed_component_names(self):
         with patch("main.github_worker_installation_token", return_value="token"), patch("main.github_api_request") as request:
