@@ -149,8 +149,7 @@ def create_v3_queue_service(
     )
     watchdog = RuntimeHealthWatchdog(
         FirestoreRuntimeHealthStore(firestore_client),
-        {"control_plane": _control_plane_available(tasks), "opencode_go": provider_available,
-         "github_worker": worker_identity_available},
+        _runtime_checks(tasks, provider_available, worker_identity_available),
     )
     return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication, completion, watchdog)
 
@@ -158,3 +157,13 @@ def create_v3_queue_service(
 def _control_plane_available(tasks: FirestoreV3TaskStore) -> bool:
     tasks.readiness_check()
     return True
+
+
+def _runtime_checks(tasks: FirestoreV3TaskStore, provider_available: Callable[[], bool],
+                    worker_identity_available: Callable[[], bool]) -> dict[str, Callable[[], bool]]:
+    """Bind probes lazily: construction must not convert a boolean into a probe."""
+    return {
+        "control_plane": lambda: _control_plane_available(tasks),
+        "opencode_go": provider_available,
+        "github_worker": worker_identity_available,
+    }
