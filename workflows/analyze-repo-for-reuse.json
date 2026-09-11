@@ -48,7 +48,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const tree = $input.first().json.tree || [];\nconst files = tree\n  .filter(i => i.path === 'README.md' || (i.path.startsWith('docs/') && i.path.endsWith('.md')))\n  .map(i => i.path);\nreturn [{ json: { files } }];"
+        "jsCode": "const source = $input.first().json;\nconst tree = source.tree || [];\nconst files = tree\n  .filter(i => i.type === 'blob')\n  .filter(i => i.path === 'README.md' || (i.path.startsWith('docs/') && i.path.endsWith('.md')));\n\n// HTTP Request processes each input item independently.  Emit one item per\n// path rather than a single array, so every Markdown file is fetched once.\nreturn files.map(file => ({\n  json: { path: file.path, source_tree_sha: source.sha || null },\n  pairedItem: { item: 0 }\n}));"
       },
       "id": "code-1",
       "name": "Filter Markdown",
@@ -58,70 +58,35 @@
     },
     {
       "parameters": {
-        "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
-          "conditions": [
-            { "id": "cond-1", "leftValue": "={{ $json.files.length }}", "rightValue": 0, "operator": { "type": "number", "operation": "gt" } }
-          ],
-          "combinator": "and"
-        }
-      },
-      "id": "if-1",
-      "name": "If Has Files",
-      "type": "n8n-nodes-base.if",
-      "typeVersion": 2,
-      "position": [1000, 300]
-    },
-    {
-      "parameters": {},
-      "id": "noop-1",
-      "name": "NoOp",
-      "type": "n8n-nodes-base.noOp",
-      "typeVersion": 1,
-      "position": [1200, 400]
-    },
-    {
-      "parameters": {
-        "batchSize": 1,
-        "options": {}
-      },
-      "id": "split-1",
-      "name": "Split In Batches",
-      "type": "n8n-nodes-base.splitInBatches",
-      "typeVersion": 3,
-      "position": [1200, 200]
-    },
-    {
-      "parameters": {
         "method": "GET",
-        "url": "=https://raw.githubusercontent.com/{{ $('Set Config').item.json.repoOwner }}/{{ $('Set Config').item.json.repoName }}/{{ $('Set Config').item.json.branch }}/{{ $json.files }}",
+        "url": "=https://raw.githubusercontent.com/{{ $('Set Config').item.json.repoOwner }}/{{ $('Set Config').item.json.repoName }}/{{ $('Set Config').item.json.branch }}/{{ $json.path }}",
         "options": {}
       },
       "id": "http-2",
       "name": "Fetch Content",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1400, 200]
+      "position": [1000, 300]
     },
     {
       "parameters": {
-        "jsCode": "const items = $items('Fetch Content');\nconst contents = items.map(item => ({\n  path: item.json.files,\n  content: typeof item.json.data === 'string' ? item.json.data : JSON.stringify(item.json.data)\n}));\nreturn [{ json: { contents } }];"
+        "jsCode": "const responses = $input.all();\nconst sourceItems = $items('Filter Markdown');\nif (responses.length !== sourceItems.length) {\n  throw new Error(`Document fetch count mismatch: expected ${sourceItems.length}, received ${responses.length}`);\n}\n\nconst contents = responses.map((item, index) => {\n  const response = item.json;\n  const content = typeof response.data === 'string'\n    ? response.data\n    : typeof response.body === 'string'\n      ? response.body\n      : JSON.stringify(response);\n  return { path: sourceItems[index].json.path, content };\n});\n\nreturn [{\n  json: {\n    contents,\n    source_tree_sha: sourceItems[0]?.json.source_tree_sha || null\n  }\n}];"
       },
       "id": "code-2",
       "name": "Aggregate Content",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1600, 200]
+      "position": [1200, 300]
     },
     {
       "parameters": {
-        "jsCode": "const contents = $input.first().json.contents;\nconst docs = contents.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n');\nconst system = 'You are a technical analyst. Analyze the provided repository documents and return a single JSON object with the following schema: { repository_summary: string, reuse_candidates: Array<{title:string,description:string,source_files:Array<string>,reusability_score:number,notes:string}>, cautions: Array<{category:string,description:string,source_files:Array<string>}>, metadata: {analyzed_at:string,total_files:number,file_paths:Array<string>} }. Respond only with the JSON object, no markdown fences.';\nconst body = JSON.stringify({\n  model: $('Set Config').item.json.llmModel || 'gpt-4o-mini',\n  messages: [{role:'system',content:system},{role:'user',content:docs}],\n  response_format: {type:'json_object'},\n  max_tokens: 8000\n});\nreturn [{ json: { body, system, docs, fileCount: contents.length, paths: contents.map(c => c.path) } }];"
+        "jsCode": "const input = $input.first().json;\nconst contents = input.contents || [];\nif (contents.length === 0) {\n  throw new Error('No README.md or docs/*.md files were found to analyze');\n}\nconst docs = contents.map(c => `--- ${c.path} ---\n${c.content}`).join('\n\n');\nconst system = 'You are a technical analyst. Analyze the provided repository documents and return a single JSON object with the following schema: { repository_summary: string, reuse_candidates: Array<{title:string,description:string,source_files:Array<string>,reusability_score:number,notes:string}>, cautions: Array<{category:string,description:string,source_files:Array<string>}>, metadata: {analyzed_at:string,total_files:number,file_paths:Array<string>} }. Respond only with the JSON object, no markdown fences.';\nconst body = JSON.stringify({\n  model: $('Set Config').item.json.llmModel || 'gpt-4o-mini',\n  messages: [{role:'system',content:system},{role:'user',content:docs}],\n  response_format: {type:'json_object'},\n  max_tokens: 8000\n});\nreturn [{ json: { body, fileCount: contents.length, paths: contents.map(c => c.path), source_tree_sha: input.source_tree_sha } }];"
       },
       "id": "code-3",
       "name": "Build Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1800, 200]
+      "position": [1400, 300]
     },
     {
       "parameters": {
@@ -143,27 +108,27 @@
       "name": "Call LLM",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2000, 200]
+      "position": [1600, 300]
     },
     {
       "parameters": {
-        "jsCode": "const raw = $input.first().json.choices?.[0]?.message?.content || '{}';\nlet parsed = {};\ntry { parsed = JSON.parse(raw); } catch(e) { parsed = { parse_error: true, raw }; }\nreturn [{ json: parsed }];"
+        "jsCode": "const raw = $input.first().json.choices?.[0]?.message?.content;\nif (!raw) {\n  throw new Error('LLM response did not contain message content');\n}\ntry {\n  return [{ json: JSON.parse(raw) }];\n} catch (error) {\n  throw new Error(`LLM response was not valid JSON: ${error.message}`);\n}"
       },
       "id": "code-4",
       "name": "Extract JSON",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2200, 200]
+      "position": [1800, 300]
     },
     {
       "parameters": {
-        "jsCode": "const analysis = $input.first().json;\nconst now = new Date().toISOString();\nconst repo = $('Set Config').item.json.repoOwner + '/' + $('Set Config').item.json.repoName;\nconst paths = $('Build Prompt').item.json.paths || [];\nconst chunks = paths.map(p => ({\n  chunk_id: p.replace(/[^a-zA-Z0-9]/g, '-'),\n  source_path: p,\n  content_digest: 'auto',\n  embedding_ready: true\n}));\nconst out = {\n  schema_version: 'luvira.repo-analysis.v1',\n  repository: repo,\n  generated_at: now,\n  summary: { repository_summary: analysis.repository_summary || '' },\n  reuse_candidates: analysis.reuse_candidates || [],\n  cautions: analysis.cautions || [],\n  chunks,\n  raw_analysis: analysis\n};\nreturn [{ json: out }];"
+        "jsCode": "const analysis = $input.first().json;\nconst now = new Date().toISOString();\nconst config = $('Set Config').item.json;\nconst prompt = $('Build Prompt').item.json;\nconst paths = prompt.paths || [];\nconst chunks = paths.map(p => ({\n  chunk_id: p.replace(/[^a-zA-Z0-9]/g, '-'),\n  source_path: p,\n  content_digest: 'auto',\n  embedding_ready: true\n}));\nconst out = {\n  schema_version: 'luvira.repo-analysis.v1',\n  repository: config.repoOwner + '/' + config.repoName,\n  source_ref: config.branch,\n  source_tree_sha: prompt.source_tree_sha || null,\n  generated_at: now,\n  summary: { repository_summary: analysis.repository_summary || '' },\n  reuse_candidates: analysis.reuse_candidates || [],\n  cautions: analysis.cautions || [],\n  chunks,\n  raw_analysis: analysis\n};\nreturn [{ json: out }];"
       },
       "id": "code-5",
       "name": "Add RAG Metadata",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, 200]
+      "position": [2000, 300]
     },
     {
       "parameters": {
@@ -174,7 +139,7 @@
       "name": "Convert to File",
       "type": "n8n-nodes-base.convertToFile",
       "typeVersion": 1,
-      "position": [2600, 200]
+      "position": [2200, 300]
     },
     {
       "parameters": {
@@ -185,7 +150,7 @@
       "name": "Save File",
       "type": "n8n-nodes-base.writeBinaryFile",
       "typeVersion": 1,
-      "position": [2800, 200]
+      "position": [2400, 300]
     }
   ],
   "connections": {
@@ -199,22 +164,10 @@
       "main": [[{ "node": "Filter Markdown", "type": "main", "index": 0 }]]
     },
     "Filter Markdown": {
-      "main": [[{ "node": "If Has Files", "type": "main", "index": 0 }]]
-    },
-    "If Has Files": {
-      "main": [
-        [{ "node": "Split In Batches", "type": "main", "index": 0 }],
-        [{ "node": "NoOp", "type": "main", "index": 0 }]
-      ]
-    },
-    "Split In Batches": {
-      "main": [
-        [{ "node": "Fetch Content", "type": "main", "index": 0 }],
-        [{ "node": "Aggregate Content", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Fetch Content", "type": "main", "index": 0 }]]
     },
     "Fetch Content": {
-      "main": [[{ "node": "Split In Batches", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Aggregate Content", "type": "main", "index": 0 }]]
     },
     "Aggregate Content": {
       "main": [[{ "node": "Build Prompt", "type": "main", "index": 0 }]]

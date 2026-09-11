@@ -2,13 +2,15 @@
 
 ## 概要
 
-本ワークフローは、リポジトリ内の `README.md` と `docs/**/*.md` を収集し、LLM に渡して「リポジトリ概要・再利用候補・注意点」を JSON 形式で出力する n8n ワークフローです。出力 JSON は将来の RAG（Retrieval-Augmented Generation）連携にそのまま利用できる構造で保存します。
+本ワークフローは、リポジトリ内の `README.md` と `docs/**/*.md` を収集し、LLM に渡して「リポジトリ概要・再利用候補・注意点」を JSON 形式で出力する n8n ワークフローです。各Markdownは1ファイルずつ取得し、全取得が完了してから1回だけ分析します。出力 JSON は将来の RAG（Retrieval-Augmented Generation）連携に利用できる構造です。
 
 ## 収集対象
 
 - リポジトリルートの `README.md`
 - `docs/` ディレクトリ配下の `.md` のみ
 - `.md` 以外のファイルは収集・送信しません
+
+`Filter Markdown` ノードは、対象パスの配列を1件ずつのn8nアイテムへ展開します。これにより、`Fetch Content` は各パスを独立して取得します。取得件数が一致しない場合は、欠けた文書のまま分析せず失敗します。
 
 ## LLM への入力設計
 
@@ -33,7 +35,8 @@
 {
   "schema_version": "luvira.repo-analysis.v1",
   "repository": "owner/repo",
-  "base_commit": "<commit-hash>",
+  "source_ref": "main",
+  "source_tree_sha": "<GitHub tree SHA>",
   "generated_at": "2026-01-01T00:00:00Z",
   "summary": { ... },
   "reuse_candidates": [ ... ],
@@ -52,7 +55,7 @@
 ```
 
 ### 保存形態
-- **アーティファクトとして保存**: n8n の「Convert to File」ノードで JSON 化し、ワークフロー実行ごとにバイナリファイルとして出力します。これを GitHub Actions Artifacts、Google Drive、S3 等へ連携することで、後続のパイプラインから参照可能です。
+- **出力の受け渡し**: n8n の「Convert to File」ノードで JSON 化し、実行ごとにファイルとして出力します。標準定義の `Save File` はn8n実行環境の一時領域へ保存します。長期保管が必要な場合は、運用環境に合わせて GitHub Actions Artifacts、Google Drive、S3 等の保存ノードへ差し替えてください。
 - **チャンク単位の分解**: 長文ドキュメントをセクション・ヘッダー単位で `chunks` に分解して保存します。ベクトル DB（Pinecone / Weaviate / pgvector）への取り込み時に、`content` を埋め込み対象テキスト、`metadata` に `source_path` や `chunk_id` を格納することで、出典追跡可能な検索を実現します。
 - **メタデータの充実**: ファイルパス、見出し、行番号、更新日時を付与し、RAG の再現性を確保します。
 - **スキーマ固定**: `schema_version` を宣言し、後続のインデクサーがスキーマ変更を検知できるようにします。
