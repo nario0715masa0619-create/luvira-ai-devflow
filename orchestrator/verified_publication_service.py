@@ -50,11 +50,18 @@ class VerifiedPublicationService:
             try:
                 artifact = self._artifacts.get(record.execution_id).artifact
                 title, body = publication_text(task.spec.requested_action)
-                url = self._publisher_for_task(task).publish(
-                    task_id=task.task_id, execution_id=record.execution_id,
-                    base_commit=artifact.base_commit, diff=artifact.diff,
-                    title=title, body=body,
-                )
+                publisher = self._publisher_for_task(task)
+                # Publication is recover-first.  A transport loss after
+                # GitHub created a PR must converge on that PR, never create
+                # another branch on each scheduler sweep.
+                lookup = getattr(publisher, "publication_url_for", None)
+                url = lookup(task.task_id, record.execution_id) if callable(lookup) else None
+                if url is None:
+                    url = publisher.publish(
+                        task_id=task.task_id, execution_id=record.execution_id,
+                        base_commit=artifact.base_commit, diff=artifact.diff,
+                        title=title, body=body,
+                    )
                 ExecutionPlatform.publish_existing(task, record.execution_id, url)
                 self._transaction.record_publication(task, record)
                 outcomes.append((task.task_id, "PUBLISHED", url))
@@ -76,5 +83,5 @@ class VerifiedPublicationService:
             except Exception:
                 # A PR may have been created before a transport interruption.
                 # Do not retry automatically and risk creating a second branch.
-                outcomes.append((task.task_id, "PUBLICATION_REQUIRES_RECONCILIATION", record.execution_id))
+                outcomes.append((task.task_id, "PUBLICATION_UNAVAILABLE_RETRYABLE", record.execution_id))
         return outcomes
