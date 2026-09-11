@@ -77,3 +77,25 @@ jobs:
           test "$(jq --raw-output '.status' <<<"$response")" = "READY"
           test "$(jq --raw-output '.backend' <<<"$response")" = "firestore"
           test "$(jq --raw-output '.lifecycle' <<<"$response")" = "v3-only"
+      - name: Verify production execution integrations after deployment
+        # These probes exercise the actual Secret Manager bindings and remote
+        # identities without generating code, starting a Worker, or writing to
+        # GitHub.  A deployment is not healthy merely because Firestore works.
+        env:
+          SERVICE_URL: ${{ steps.deployed-service.outputs.url }}
+          ID_TOKEN: ${{ steps.control-plane-token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          opencode="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $ID_TOKEN" \
+            "$SERVICE_URL/readiness/opencode-go")"
+          test "$(jq --raw-output '.status' <<<"$opencode")" = "READY"
+          test "$(jq --raw-output '.provider' <<<"$opencode")" = "opencode-go"
+          test "$(jq --raw-output '.model_count' <<<"$opencode")" -gt 0
+
+          github_worker="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $ID_TOKEN" \
+            "$SERVICE_URL/readiness/github-worker")"
+          test "$(jq --raw-output '.status' <<<"$github_worker")" = "READY"
+          test "$(jq --raw-output '.provider' <<<"$github_worker")" = "github-worker"
+          test "$(jq --raw-output '.account' <<<"$github_worker")" = "nario0715masa0619-create"
