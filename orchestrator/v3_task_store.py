@@ -145,4 +145,24 @@ class FirestoreV3TaskStore:
             try:
                 yield task_from_payload(snapshot.to_dict())
             except V3TaskStoreError as exc:
-                logging.error("V3_TASK_SKIPPED_INVALID_RECORD id=%s reason=%s", snapshot.id, str(exc))
+                # A malformed historical record cannot be retried, published,
+                # or safely repaired in place.  Quarantine it once so a
+                # two-minute sweep does not emit the same alert forever or
+                # block unrelated valid work.
+                self._quarantine_invalid(snapshot, str(exc))
+
+    @staticmethod
+    def _quarantine_invalid(snapshot, reason: str) -> None:
+        terminal = V3Status.EXECUTION_FAILED_FINAL.value
+        try:
+            snapshot.reference.update({
+                "status": terminal,
+                "execution.status": terminal,
+                "execution.failure_code": "V3_TASK_INTEGRITY_INVALID_FINAL",
+                "audit": ["V3_TASK_INTEGRITY_QUARANTINED"],
+            }, option=firestore.LastUpdateOption(snapshot.update_time))
+            logging.error("V3_TASK_QUARANTINED_INVALID_RECORD id=%s reason=%s", snapshot.id, reason)
+        except Exception:
+            # A best-effort quarantine must never turn a malformed historical
+            # row into an outage for the rest of the autonomous queue.
+            logging.error("V3_TASK_QUARANTINE_UNAVAILABLE id=%s reason=%s", snapshot.id, reason)
