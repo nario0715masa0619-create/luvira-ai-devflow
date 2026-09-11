@@ -32,3 +32,13 @@ class AutonomousBrokerTest(unittest.TestCase):
         dispatcher = type("Dispatcher", (), {"dispatch": lambda *_: "cloud-run-1"})()
         outcome = AutonomousBroker(tasks, queue, dispatcher).sweep()
         self.assertEqual(outcome, [("t", "WORKER_STARTED", "cloud-run-1")])
+
+    def test_monitoring_failure_never_blocks_an_approved_task(self):
+        task = Task(V3Status.AUTHORIZED)
+        tasks = type("Tasks", (), {"eligible": lambda _: [task]})()
+        queue = type("Queue", (), {"request": lambda *_: (type("Record", (), {"execution_id": "internal"})(), None)})()
+        watchdog = type("Watchdog", (), {"sweep": lambda _: (_ for _ in ()).throw(TimeoutError())})()
+
+        outcome = AutonomousBroker(tasks, queue, runtime_watchdog=watchdog).sweep()
+
+        self.assertEqual(outcome, [("runtime", "RUNTIME_HEALTH_UNAVAILABLE", "monitor_unavailable"), ("t", "QUEUED", "internal")])

@@ -63,6 +63,9 @@ def create_v3_queue_from_environment():
         implementation_api_key=os.environ.get("OPENCODE_GO_API_KEY", ""),
         implementation_model=OPENCODE_IMPLEMENTATION_MODEL,
         source_token_for_repository=lambda _repository: github_worker_installation_token(),
+        # Resolve at watchdog execution time; this module composes its private
+        # runtime before the helper functions below are defined.
+        worker_identity_available=lambda: github_worker_identity_available(),
         artifact_bucket=WORKER_ARTIFACT_BUCKET,
         artifact_view=WORKER_ARTIFACT_VIEW,
     )
@@ -75,6 +78,7 @@ V3_CONTROL_PLANE = V3ControlPlane(V3_TASK_STORE, V3_QUEUE_SERVICE) if V3_TASK_ST
 V3_AUTONOMOUS_BROKER = AutonomousBroker(
     V3_TASK_STORE, V3_QUEUE_SERVICE, V3_QUEUE_RUNTIME.dispatcher, V3_QUEUE_RUNTIME.reconciler,
     V3_QUEUE_RUNTIME.implementation, V3_QUEUE_RUNTIME.publication, V3_QUEUE_RUNTIME.completion,
+    V3_QUEUE_RUNTIME.runtime_watchdog,
 ) if V3_QUEUE_RUNTIME else None
 
 
@@ -509,6 +513,19 @@ def github_worker_installation(app_id, installation_id, private_key):
     if not isinstance(payload, dict):
         raise ValueError("invalid GitHub installation response")
     return payload
+
+
+def github_worker_identity_available():
+    """Return a boolean only after proving the configured installation owner."""
+    app_id = os.environ.get("GITHUB_WORKER_APP_ID", "")
+    installation_id = os.environ.get("GITHUB_WORKER_INSTALLATION_ID", "")
+    private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
+    if not app_id or not installation_id or not private_key:
+        return False
+    installation = github_worker_installation(app_id, installation_id, private_key)
+    account = (installation.get("account") or {}).get("login")
+    expected_account = EXPECTED_REPOSITORY.split("/", 1)[0]
+    return installation.get("id") == int(installation_id) and account == expected_account
 
 
 def github_worker_quality_evidence(app_id, installation_id, private_key, source_branch):

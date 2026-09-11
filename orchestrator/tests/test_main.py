@@ -172,6 +172,17 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json["reason"], "github_worker_not_configured")
 
+    def test_runtime_watchdog_identity_check_requires_expected_account(self):
+        configured = {
+            "GITHUB_WORKER_APP_ID": "4823016",
+            "GITHUB_WORKER_INSTALLATION_ID": "158901090",
+            "GITHUB_WORKER_PRIVATE_KEY": "test-key",
+        }
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value={"id": 158901090, "account": {"login": "other"}}):
+            self.assertFalse(main.github_worker_identity_available())
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value={"id": 158901090, "account": {"login": "nario0715masa0619-create"}}):
+            self.assertTrue(main.github_worker_identity_available())
+
     def test_worker_eligibility_uses_github_workflow_records(self):
         configured = {
             "GITHUB_WORKER_APP_ID": "4823016",
