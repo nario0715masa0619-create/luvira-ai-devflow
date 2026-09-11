@@ -1,6 +1,6 @@
 import unittest
 
-from github_verified_publisher import GitHubVerifiedPublisher, apply_patch, parse_verified_diff
+from github_verified_publisher import GitHubVerifiedPublisher, VerifiedPublicationError, apply_patch, parse_verified_diff
 
 
 class VerifiedPublisherTest(unittest.TestCase):
@@ -20,6 +20,8 @@ class VerifiedPublisherTest(unittest.TestCase):
 
         def call(method, path, body=None):
             calls.append((method, path, body))
+            if method == "GET" and "/contents/" in path:
+                raise VerifiedPublicationError("publication_github_http_404")
             return {"html_url": "https://example.test/pr/1"} if path.endswith("/pulls") else {}
 
         publisher._call = call
@@ -30,6 +32,17 @@ class VerifiedPublisherTest(unittest.TestCase):
         )
 
         self.assertFalse(calls[-1][2]["draft"])
+
+    def test_rejects_creation_when_the_immutable_base_already_has_the_target(self):
+        publisher = GitHubVerifiedPublisher("a/b", "token")
+        publisher._call = lambda *_args, **_kwargs: {"content": "", "sha": "present"}
+
+        with self.assertRaisesRegex(ValueError, "publication_base_content_already_exists"):
+            publisher.publish(
+                task_id="task", execution_id="execution", base_commit="a" * 40,
+                diff=b"--- /dev/null\n+++ b/src/new.py\n@@ -0,0 +1 @@\n+created\n",
+                title="題名", body="本文",
+            )
 
     def test_returns_none_when_the_deterministic_branch_has_no_pr_yet(self):
         publisher = GitHubVerifiedPublisher("a/b", "token")

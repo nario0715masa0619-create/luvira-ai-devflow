@@ -6,6 +6,7 @@ from github_verified_publisher import VerifiedPublicationError
 
 FINAL_PUBLICATION_CODES = frozenset({
     "publication_base_content_missing",
+    "publication_base_content_already_exists",
     "publication_base_content_invalid",
     "publication_patch_context_mismatch",
     "publication_patch_offset_invalid",

@@ -166,6 +166,17 @@ class GitHubVerifiedPublisher:
                     source = base64.b64decode(current["content"], validate=True); sha = current["sha"]
                 except (KeyError, TypeError, ValueError) as exc:
                     raise VerifiedPublicationError("publication_base_content_invalid") from exc
+            else:
+                # A creation patch is valid only when its immutable base does
+                # not already contain the target.  Without this check a stale
+                # artifact reaches GitHub and fails later with an opaque 422.
+                try:
+                    self._call("GET", f"/repos/{repo}/contents/{quote(patch.new_path, safe='/')}?ref={quote(base_commit, safe='')}")
+                except VerifiedPublicationError as exc:
+                    if str(exc) != "publication_github_http_404":
+                        raise
+                else:
+                    raise VerifiedPublicationError("publication_base_content_already_exists")
             writes.append((patch, path, sha, apply_patch(source, patch)))
         self._call("POST", f"/repos/{repo}/git/refs", {"ref": f"refs/heads/{branch}", "sha": base_commit})
         for patch, path, sha, result in writes:
