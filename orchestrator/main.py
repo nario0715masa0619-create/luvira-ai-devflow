@@ -66,6 +66,7 @@ def create_v3_queue_from_environment():
         # Resolve at watchdog execution time; this module composes its private
         # runtime before the helper functions below are defined.
         worker_identity_available=lambda: github_worker_identity_available(),
+        runtime_incident_reporter=lambda checks: create_runtime_incident(checks),
         artifact_bucket=WORKER_ARTIFACT_BUCKET,
         artifact_view=WORKER_ARTIFACT_VIEW,
     )
@@ -528,6 +529,26 @@ def github_worker_identity_available():
     return installation.get("id") == int(installation_id) and account == expected_account
 
 
+def create_runtime_incident(checks):
+    """Open one bounded operational alert after a durable health transition."""
+    if not isinstance(checks, dict) or not checks or not all(
+        isinstance(name, str) and isinstance(status, str) and status in {"READY", "BLOCKED", "UNAVAILABLE"}
+        for name, status in checks.items()
+    ):
+        raise ValueError("runtime_incident_checks_invalid")
+    failed = sorted(name for name, status in checks.items() if status != "READY")
+    if not failed:
+        raise ValueError("runtime_incident_not_required")
+    github_api_request(
+        f"{GITHUB_API_URL}/repos/{EXPECTED_REPOSITORY}/issues", method="POST",
+        token=github_worker_installation_token(), body={
+            "title": "DevFlow runtime health blocked",
+            "body": "Automated runtime monitoring could not verify: " + ", ".join(failed) + ".\n\n"
+                    "The broker continues recovery safely; investigate the current runtime health record before approving new work.",
+        },
+    )
+
+
 def github_worker_quality_evidence(app_id, installation_id, private_key, source_branch):
     """Read only GitHub branch and workflow records; never create a branch, PR, or commit."""
     now = int(time.time())
@@ -560,7 +581,7 @@ def github_worker_quality_evidence(app_id, installation_id, private_key, source_
     return {"head_sha": head_sha, "workflows": outcomes}
 
 
-def github_api_request(url, method="GET", token=None):
+def github_api_request(url, method="GET", token=None, body=None):
     headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": "luvira-devflow-worker-eligibility/1",
@@ -568,7 +589,10 @@ def github_api_request(url, method="GET", token=None):
     }
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    request = Request(url, headers=headers, method=method)
+    data = None if body is None else json.dumps(body).encode()
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    request = Request(url, headers=headers, data=data, method=method)
     with urlopen(request, timeout=10) as response:  # nosec B310: fixed GitHub HTTPS endpoint
         result = json.loads(response.read().decode())
     if not isinstance(result, dict):
