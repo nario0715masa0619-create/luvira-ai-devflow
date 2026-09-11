@@ -38,7 +38,8 @@ class GitHubReadOnlySource:
             raise GitHubSourceReadError("github_source_response_invalid")
         return value
 
-    def snapshot(self, base_commit: str, allowed_paths: tuple[str, ...]):
+    def snapshot(self, base_commit: str, allowed_paths: tuple[str, ...],
+                 baseline_paths: tuple[str, ...] | None = None):
         repo = quote(self.repository, safe="/")
         commit = quote(base_commit, safe="")
         tree = self._get(f"/repos/{repo}/git/trees/{commit}?recursive=1").get("tree")
@@ -52,6 +53,6 @@ class GitHubReadOnlySource:
             # The implementation service supplies only ``content`` to the
             # provider.  It retains ``paths`` locally so the verifier can
             # prove that the returned diff headers match this exact commit.
-            return builder.build(base_commit, allowed_paths)
+            return builder.build(base_commit, allowed_paths, baseline_paths)
         except ValueError as exc:
             raise GitHubSourceReadError(str(exc)) from exc

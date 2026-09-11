@@ -27,3 +27,19 @@ class SourceSnapshotTest(unittest.TestCase):
         snapshot = builder.build("a" * 40, ("README.md",))
 
         self.assertEqual(snapshot.content, b"--- README.md\nprint(1)\n\n")
+
+    def test_exposes_output_scope_existence_without_reading_its_content(self):
+        reads = []
+        builder = SourceSnapshotBuilder(
+            lambda _: [
+                {"type": "blob", "path": "docs/input.md", "sha": "input"},
+                {"type": "blob", "path": "workflows/existing.json", "sha": "output"},
+            ],
+            lambda sha: reads.append(sha) or {"content": base64.b64encode(b"input\n").decode()},
+        )
+
+        snapshot = builder.build("a" * 40, ("docs/",), ("workflows/",))
+
+        self.assertEqual(snapshot.paths, ("docs/input.md",))
+        self.assertEqual(snapshot.baseline_paths, ("workflows/existing.json",))
+        self.assertEqual(reads, ["input"])

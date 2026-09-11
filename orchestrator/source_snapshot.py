@@ -24,6 +24,11 @@ class SourceSnapshot:
     # the model remains compact text, while verification can apply its diff to
     # these bytes before an artifact is ever made durable.
     files: tuple[tuple[str, bytes], ...]
+    # A metadata-only manifest of every path eligible for output.  This is
+    # deliberately broader than ``paths``: the model receives only the
+    # approved source subset, while the verifier must still know whether a
+    # claimed creation already exists at the immutable base.
+    baseline_paths: tuple[str, ...]
 
 
 def _allowed(path: str, prefixes: tuple[str, ...]) -> bool:
@@ -36,14 +41,20 @@ class SourceSnapshotBuilder:
     def __init__(self, list_tree: Callable[[str], list[dict]], read_blob: Callable[[str], dict]):
         self._list_tree, self._read_blob = list_tree, read_blob
 
-    def build(self, base_commit: str, allowed_paths: tuple[str, ...]) -> SourceSnapshot:
+    def build(self, base_commit: str, allowed_paths: tuple[str, ...],
+              baseline_paths: tuple[str, ...] | None = None) -> SourceSnapshot:
         if not isinstance(base_commit, str) or len(base_commit) != 40 or not allowed_paths:
             raise SourceSnapshotError("source_snapshot_input_invalid")
+        tree = self._list_tree(base_commit)
         selected = []
-        for item in self._list_tree(base_commit):
+        manifest = []
+        output_scope = baseline_paths or allowed_paths
+        for item in tree:
             path = item.get("path") if isinstance(item, dict) else None
             if item.get("type") == "blob" and isinstance(path, str) and _allowed(path, allowed_paths):
                 selected.append((path, item.get("sha")))
+            if item.get("type") == "blob" and isinstance(path, str) and _allowed(path, output_scope):
+                manifest.append(path)
         if not selected or len(selected) > MAX_FILES:
             raise SourceSnapshotError("source_snapshot_scope_invalid")
         chunks = []
@@ -70,5 +81,5 @@ class SourceSnapshotBuilder:
             files.append((path, content))
         return SourceSnapshot(
             base_commit, "".join(chunks).encode("utf-8"),
-            tuple(path for path, _ in sorted(selected)), tuple(files),
+            tuple(path for path, _ in sorted(selected)), tuple(files), tuple(sorted(manifest)),
         )
