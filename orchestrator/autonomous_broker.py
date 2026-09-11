@@ -3,12 +3,21 @@ from execution_platform import ExecutionPlatformError, V3Status
 
 
 class AutonomousBroker:
-    def __init__(self, tasks, queue, dispatcher=None, reconciler=None, implementation=None, publication=None, completion=None):
-        self.tasks, self.queue, self.dispatcher, self.reconciler, self.implementation, self.publication, self.completion = tasks, queue, dispatcher, reconciler, implementation, publication, completion
+    def __init__(self, tasks, queue, dispatcher=None, reconciler=None, implementation=None, publication=None, completion=None, runtime_watchdog=None):
+        self.tasks, self.queue, self.dispatcher, self.reconciler, self.implementation, self.publication, self.completion, self.runtime_watchdog = tasks, queue, dispatcher, reconciler, implementation, publication, completion, runtime_watchdog
 
     def sweep(self):
         """Attempt each eligible persisted task; retain approval on failure."""
         outcomes = []
+        if self.runtime_watchdog is not None:
+            try:
+                outcome, detail = self.runtime_watchdog.sweep()
+                outcomes.append(("runtime", outcome, detail))
+            except Exception:
+                # Monitoring must never freeze recovery, publication, or an
+                # unrelated approved task.  Its durable record is diagnostic,
+                # not a second authority over the state machine.
+                outcomes.append(("runtime", "RUNTIME_HEALTH_UNAVAILABLE", "monitor_unavailable"))
         if self.reconciler is not None:
             outcomes.extend(self.reconciler.sweep())
         if self.implementation is not None:

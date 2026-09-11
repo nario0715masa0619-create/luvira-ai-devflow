@@ -25,6 +25,7 @@ from opencode_implementation_client import OpenCodeImplementationClient
 from github_verified_publisher import GitHubVerifiedPublisher
 from verified_publication_service import VerifiedPublicationService
 from publication_completion_service import PublicationCompletionService
+from runtime_health_watchdog import FirestoreRuntimeHealthStore, RuntimeHealthWatchdog
 
 
 @dataclass(frozen=True)
@@ -36,6 +37,7 @@ class V3QueueRuntime:
     implementation: ImplementationExecutionService
     publication: VerifiedPublicationService
     completion: PublicationCompletionService
+    runtime_watchdog: RuntimeHealthWatchdog
 
 
 def create_v3_queue_service(
@@ -50,6 +52,7 @@ def create_v3_queue_service(
     implementation_api_key: str,
     implementation_model: str,
     source_token_for_repository: Callable[[str], str],
+    worker_identity_available: Callable[[], bool],
     artifact_bucket: str = "luvira-devflow-bootstrap-results",
     artifact_view: str = "bootstrap-results",
     artifact_collection: str = "devflow_verified_artifacts",
@@ -144,4 +147,14 @@ def create_v3_queue_service(
         tasks, transaction,
         lambda task: GitHubVerifiedPublisher(task.spec.repository, source_token_for_repository(task.spec.repository)),
     )
-    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication, completion)
+    watchdog = RuntimeHealthWatchdog(
+        FirestoreRuntimeHealthStore(firestore_client),
+        {"control_plane": _control_plane_available(tasks), "opencode_go": provider_available,
+         "github_worker": worker_identity_available},
+    )
+    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication, completion, watchdog)
+
+
+def _control_plane_available(tasks: FirestoreV3TaskStore) -> bool:
+    tasks.readiness_check()
+    return True
