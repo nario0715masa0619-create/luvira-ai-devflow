@@ -30,3 +30,16 @@ class VerifiedPublisherTest(unittest.TestCase):
         )
 
         self.assertFalse(calls[-1][2]["draft"])
+
+    def test_returns_none_when_the_deterministic_branch_has_no_pr_yet(self):
+        publisher = GitHubVerifiedPublisher("a/b", "token")
+        publisher._call = lambda *_args, **_kwargs: []
+
+        self.assertIsNone(publisher.publication_url_for("task", "execution"))
+
+    def test_rejects_multiple_prs_for_one_deterministic_branch(self):
+        publisher = GitHubVerifiedPublisher("a/b", "token")
+        publisher._call = lambda *_args, **_kwargs: [{}, {}]
+
+        with self.assertRaisesRegex(ValueError, "publication_pull_not_unique"):
+            publisher.publication_url_for("task", "execution")
