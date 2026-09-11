@@ -13,9 +13,58 @@ permissions:
   id-token: write
 
 jobs:
+  validate_issue:
+    # Do not consume a protected human approval just to discover that the
+    # Issue Form was rejected during webhook intake.  This read-only gate
+    # proves that the immutable approval candidate already exists.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        id: discovery_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval
+          service_account: devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+      - name: Discover the canonical orchestrator endpoint
+        id: orchestrator
+        run: |
+          set -euo pipefail
+          url="$(gcloud run services describe luvira-devflow-orchestrator \
+            --region us-central1 \
+            --project luvira-ai-control-plane \
+            --format='value(status.url)')"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@v2
+        id: request_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval
+          service_account: devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+          token_format: id_token
+          id_token_audience: ${{ steps.orchestrator.outputs.url }}
+          id_token_include_email: true
+      - name: Verify the Issue Form is ready for approval
+        env:
+          ID_TOKEN: ${{ steps.request_auth.outputs.id_token }}
+          ORCHESTRATOR_URL: ${{ steps.orchestrator.outputs.url }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          set -euo pipefail
+          if ! pending="$(curl --fail --silent --show-error \
+            --header "Authorization: Bearer $ID_TOKEN" \
+            "$ORCHESTRATOR_URL/control-plane/v3/approval-issues/$ISSUE_NUMBER/pending")"; then
+            echo "::error title=承認Issueを受理できません::ai-approvalラベル、全必須項目、許可する出力パス、参照を許可する既存パスを確認してください。"
+            exit 1
+          fi
+          test "$(jq --raw-output '.status' <<<"$pending")" = "AWAITING_HUMAN_APPROVAL"
+          test "$(jq --raw-output '.task_id' <<<"$pending")" != "null"
+          test "$(jq --raw-output '.approval_binding' <<<"$pending")" != "null"
+
   authorize:
     # GitHub supplies the protected human decision.  The v3 Control Plane is
     # the sole owner of the atomic authorization-and-queue state transition.
+    needs: validate_issue
     environment: human-approval
     runs-on: ubuntu-latest
     steps:
