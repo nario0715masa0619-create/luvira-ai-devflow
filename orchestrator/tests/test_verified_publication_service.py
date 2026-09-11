@@ -23,6 +23,20 @@ class VerifiedPublicationServiceTest(unittest.TestCase):
             ("Luvira: 実装成果物", "承認済みタスクから生成・検証された実装成果物です。独立レビューと人による確認後にマージしてください。"),
         )
 
+    def test_persists_the_exact_recoverable_publication_code(self):
+        spec = TaskSpec.from_dict({"repository":"a/b", "base_commit":"a" * 40, "requested_action":"implementation", "acceptance_criteria":["test"], "budget":{"max_cost_usd":1}, "expiry":"2026-12-01T00:00:00Z", "execution_scope":{"allowed_paths":["src/"]}, "model_policy":"low-cost"})
+        record = ExecutionRecord("execution", "task", spec.hash, 1, V3Status.ARTIFACT_VERIFIED)
+        task = V3Task("task", spec, V3Status.ARTIFACT_VERIFIED, execution=record)
+        tasks = type("Tasks", (), {"artifact_verified": lambda _: [task]})()
+        writes = []
+        transaction = type("Tx", (), {"record_publication_recovery": lambda _, current, current_record: writes.append(current_record.failure_code)})()
+        publisher = type("Publisher", (), {"publication_url_for": lambda *_: (_ for _ in ()).throw(VerifiedPublicationError("publication_github_http_403"))})()
+
+        outcomes = VerifiedPublicationService(tasks, transaction, None, lambda _: publisher).sweep()
+
+        self.assertEqual(outcomes, [("task", "PUBLICATION_GITHUB_HTTP_403", "execution")])
+        self.assertEqual(writes, ["PUBLICATION_GITHUB_HTTP_403"])
+
     def test_uses_japanese_fallback_metadata(self):
         self.assertEqual(publication_text("other")[0], "Luvira: 承認済み成果物")
 
