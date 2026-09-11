@@ -53,6 +53,7 @@ def create_v3_queue_service(
     implementation_model: str,
     source_token_for_repository: Callable[[str], str],
     worker_identity_available: Callable[[], bool],
+    runtime_incident_reporter: Callable[[dict[str, str]], None],
     artifact_bucket: str = "luvira-devflow-bootstrap-results",
     artifact_view: str = "bootstrap-results",
     artifact_collection: str = "devflow_verified_artifacts",
@@ -149,7 +150,7 @@ def create_v3_queue_service(
     )
     watchdog = RuntimeHealthWatchdog(
         FirestoreRuntimeHealthStore(firestore_client),
-        _runtime_checks(tasks, provider_available, worker_identity_available),
+        _runtime_checks(tasks, provider_available, worker_identity_available), runtime_incident_reporter,
     )
     return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication, completion, watchdog)
 

@@ -183,6 +183,15 @@ class EventTest(unittest.TestCase):
         with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value={"id": 158901090, "account": {"login": "nario0715masa0619-create"}}):
             self.assertTrue(main.github_worker_identity_available())
 
+    def test_runtime_incident_uses_only_failed_component_names(self):
+        with patch("main.github_worker_installation_token", return_value="token"), patch("main.github_api_request") as request:
+            main.create_runtime_incident({"control_plane": "READY", "opencode_go": "UNAVAILABLE"})
+
+        request.assert_called_once()
+        self.assertEqual(request.call_args.kwargs["body"]["title"], "DevFlow runtime health blocked")
+        self.assertIn("opencode_go", request.call_args.kwargs["body"]["body"])
+        self.assertNotIn("token", request.call_args.kwargs["body"]["body"])
+
     def test_worker_eligibility_uses_github_workflow_records(self):
         configured = {
             "GITHUB_WORKER_APP_ID": "4823016",

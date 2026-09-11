@@ -30,7 +30,8 @@ class RuntimeHealthWatchdogTest(unittest.TestCase):
 
         self.assertEqual(watchdog.sweep(), ("RUNTIME_HEALTH_BLOCKED", "BLOCKED"))
         self.assertEqual(store.writes, [{"status": "BLOCKED", "checked_at": self.now,
-                                         "checks": {"store": "READY", "provider": "UNAVAILABLE"}}])
+                                         "checks": {"store": "READY", "provider": "UNAVAILABLE"},
+                                         "alert": "NOT_CONFIGURED"}])
 
     def test_healthy_record_is_cached_but_a_failure_is_not(self):
         store = Store({"status": "READY", "checked_at": self.now - timedelta(minutes=5), "checks": {}})
@@ -43,3 +44,18 @@ class RuntimeHealthWatchdogTest(unittest.TestCase):
         store.value = {"status": "BLOCKED", "checked_at": self.now, "checks": {}}
         self.assertEqual(watchdog.sweep(), ("RUNTIME_HEALTH_READY", "READY"))
         self.assertEqual(called, [True])
+
+    def test_alerts_once_per_outage_and_retries_a_failed_alert(self):
+        store = Store()
+        reported = []
+        watchdog = RuntimeHealthWatchdog(store, {"provider": lambda: False}, incident_reporter=lambda checks: reported.append(checks), clock=lambda: self.now)
+
+        watchdog.sweep()
+        watchdog.sweep()
+
+        self.assertEqual(reported, [{"provider": "BLOCKED"}])
+        self.assertEqual(store.value["alert"], "SENT")
+
+        failed = RuntimeHealthWatchdog(Store(), {"provider": lambda: False}, incident_reporter=lambda _: (_ for _ in ()).throw(RuntimeError()), clock=lambda: self.now)
+        failed.sweep()
+        self.assertEqual(failed._store.value["alert"], "PENDING")

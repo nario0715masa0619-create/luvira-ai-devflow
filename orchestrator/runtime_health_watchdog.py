@@ -14,8 +14,10 @@ class RuntimeHealthWatchdog:
     """
 
     def __init__(self, store: Any, checks: dict[str, Callable[[], bool]],
+                 incident_reporter: Callable[[dict[str, str]], None] | None = None,
                  interval: timedelta = timedelta(minutes=15), clock: Callable[[], datetime] | None = None):
         self._store, self._checks, self._interval = store, checks, interval
+        self._incident_reporter = incident_reporter
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def sweep(self) -> tuple[str, str]:
@@ -33,8 +35,23 @@ class RuntimeHealthWatchdog:
                 # stable code: no credentials or provider responses are stored.
                 results[name] = "UNAVAILABLE"
         status = "READY" if all(value == "READY" for value in results.values()) else "BLOCKED"
-        self._store.record({"status": status, "checked_at": now, "checks": results})
+        alert = self._alert_status(previous, status, results)
+        self._store.record({"status": status, "checked_at": now, "checks": results, "alert": alert})
         return ("RUNTIME_HEALTH_READY" if status == "READY" else "RUNTIME_HEALTH_BLOCKED", status)
+
+    def _alert_status(self, previous: dict[str, Any] | None, status: str, results: dict[str, str]) -> str:
+        if status == "READY":
+            return "NOT_REQUIRED"
+        if previous and previous.get("status") == "BLOCKED" and previous.get("alert") == "SENT":
+            return "SENT"
+        if self._incident_reporter is None:
+            return "NOT_CONFIGURED"
+        try:
+            self._incident_reporter(results)
+        except Exception:
+            # Leave the alert pending so the next two-minute sweep retries it.
+            return "PENDING"
+        return "SENT"
 
     def _is_fresh_ready(self, value: dict[str, Any] | None, now: datetime) -> bool:
         if not value or value.get("status") != "READY":
