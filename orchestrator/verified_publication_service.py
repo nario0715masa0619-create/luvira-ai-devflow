@@ -79,9 +79,15 @@ class VerifiedPublicationService:
                     )
                     outcomes.append((task.task_id, "PUBLICATION_ARTIFACT_INVALID_FINAL", record.execution_id))
                     continue
-                outcomes.append((task.task_id, "PUBLICATION_REQUIRES_RECONCILIATION", record.execution_id))
+                code = str(exc).upper()
+                ExecutionPlatform.note_publication_recovery(task, record.execution_id, code)
+                self._transaction.record_publication_recovery(task, record)
+                outcomes.append((task.task_id, code, record.execution_id))
             except Exception:
                 # A PR may have been created before a transport interruption.
                 # Do not retry automatically and risk creating a second branch.
-                outcomes.append((task.task_id, "PUBLICATION_UNAVAILABLE_RETRYABLE", record.execution_id))
+                code = "PUBLICATION_UNAVAILABLE_RETRYABLE"
+                ExecutionPlatform.note_publication_recovery(task, record.execution_id, code)
+                self._transaction.record_publication_recovery(task, record)
+                outcomes.append((task.task_id, code, record.execution_id))
         return outcomes

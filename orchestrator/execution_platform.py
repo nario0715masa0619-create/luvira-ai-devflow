@@ -393,9 +393,23 @@ class ExecutionPlatform:
         if not isinstance(publication_url, str) or not publication_url.startswith("https://github.com/"):
             raise TransitionRejected("publication_url_invalid")
         task.execution.publication_url = publication_url
+        task.execution.failure_code = None
         task.execution.status = V3Status.PUBLISHED
         task.status = V3Status.PUBLISHED
         task.audit.append("PUBLISHED")
+        return task
+
+    @staticmethod
+    def note_publication_recovery(task: V3Task, execution_id: str, code: str) -> V3Task:
+        """Persist the exact recoverable publication failure without losing work."""
+        if task.status is not V3Status.ARTIFACT_VERIFIED:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        if not isinstance(code, str) or not code:
+            raise TransitionRejected("publication_recovery_code_invalid")
+        task.execution.failure_code = code
+        task.audit.append(f"PUBLICATION_RECOVERY:{code}")
         return task
 
     @staticmethod
