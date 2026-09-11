@@ -153,18 +153,19 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 410)
         self.assertEqual(response.json["reason"], "legacy_execution_route_retired")
 
-    def test_github_worker_readiness_returns_identity_only(self):
+    def test_github_worker_readiness_returns_alert_token_readiness(self):
         configured = {
             "GITHUB_WORKER_APP_ID": "4823016",
             "GITHUB_WORKER_INSTALLATION_ID": "158901090",
             "GITHUB_WORKER_PRIVATE_KEY": "test-key",
         }
         installation = {"id": 158901090, "account": {"login": "nario0715masa0619-create"}, "permissions": {"issues": "write"}}
-        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value=installation) as verify:
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value=installation) as verify, patch("main.github_worker_installation_token", return_value="token"), patch("main.github_api_request", return_value={"full_name": "nario0715masa0619-create/luvira-ai-devflow"}) as repository:
             response = self.client.get("/readiness/github-worker")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json, {"status": "READY", "provider": "github-worker", "installation_id": 158901090, "account": "nario0715masa0619-create", "incident_alerting": "issues-write"})
+        self.assertEqual(response.json, {"status": "READY", "provider": "github-worker", "installation_id": 158901090, "account": "nario0715masa0619-create", "incident_alerting": "issues-write-token-ready"})
         verify.assert_called_once_with("4823016", "158901090", "test-key")
+        repository.assert_called_once_with("https://api.github.com/repos/nario0715masa0619-create/luvira-ai-devflow", token="token")
 
     def test_github_worker_readiness_blocks_without_configuration(self):
         with patch.dict(os.environ, {"GITHUB_WORKER_APP_ID": "", "GITHUB_WORKER_INSTALLATION_ID": "", "GITHUB_WORKER_PRIVATE_KEY": ""}):
@@ -195,6 +196,18 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json["reason"], "github_worker_issues_write_required")
 
+    def test_github_worker_readiness_blocks_unusable_alert_token(self):
+        configured = {
+            "GITHUB_WORKER_APP_ID": "4823016",
+            "GITHUB_WORKER_INSTALLATION_ID": "158901090",
+            "GITHUB_WORKER_PRIVATE_KEY": "test-key",
+        }
+        installation = {"id": 158901090, "account": {"login": "nario0715masa0619-create"}, "permissions": {"issues": "write"}}
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value=installation), patch("main.github_worker_installation_token", side_effect=ValueError("unavailable")):
+            response = self.client.get("/readiness/github-worker")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json["reason"], "github_worker_alert_token_unavailable")
+
     def test_runtime_incident_uses_only_failed_component_names(self):
         with patch("main.github_worker_installation_token", return_value="token"), patch("main.github_api_request") as request:
             main.create_runtime_incident({"control_plane": "READY", "opencode_go": "UNAVAILABLE"})
@@ -203,6 +216,14 @@ class EventTest(unittest.TestCase):
         self.assertEqual(request.call_args.kwargs["body"]["title"], "DevFlow runtime health blocked")
         self.assertIn("opencode_go", request.call_args.kwargs["body"]["body"])
         self.assertNotIn("token", request.call_args.kwargs["body"]["body"])
+
+    def test_runtime_alerting_probe_requires_the_expected_repository(self):
+        configured = {
+            "GITHUB_WORKER_APP_ID": "4823016", "GITHUB_WORKER_INSTALLATION_ID": "158901090", "GITHUB_WORKER_PRIVATE_KEY": "test-key",
+        }
+        installation = {"id": 158901090, "account": {"login": "nario0715masa0619-create"}, "permissions": {"issues": "write"}}
+        with patch.dict(os.environ, configured), patch("main.github_worker_installation", return_value=installation), patch("main.github_worker_installation_token", return_value="token"), patch("main.github_api_request", return_value={"full_name": "other/repository"}):
+            self.assertFalse(main.github_worker_alerting_available())
 
     def test_worker_eligibility_uses_github_workflow_records(self):
         configured = {
