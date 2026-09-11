@@ -99,3 +99,4 @@ jobs:
           test "$(jq --raw-output '.status' <<<"$github_worker")" = "READY"
           test "$(jq --raw-output '.provider' <<<"$github_worker")" = "github-worker"
           test "$(jq --raw-output '.account' <<<"$github_worker")" = "nario0715masa0619-create"
+          test "$(jq --raw-output '.incident_alerting' <<<"$github_worker")" = "issues-write"
