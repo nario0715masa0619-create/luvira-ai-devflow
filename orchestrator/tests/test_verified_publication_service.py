@@ -6,6 +6,17 @@ from verified_publication_service import VerifiedPublicationService, publication
 
 
 class VerifiedPublicationServiceTest(unittest.TestCase):
+
+    def test_recovers_an_existing_pr_before_attempting_another_publication(self):
+        spec = TaskSpec.from_dict({"repository":"a/b", "base_commit":"a" * 40, "requested_action":"implementation", "acceptance_criteria":["test"], "budget":{"max_cost_usd":1}, "expiry":"2026-12-01T00:00:00Z", "execution_scope":{"allowed_paths":["src/"]}, "model_policy":"low-cost"})
+        record = ExecutionRecord("execution", "task", spec.hash, 1, V3Status.ARTIFACT_VERIFIED)
+        task = V3Task("task", spec, V3Status.ARTIFACT_VERIFIED, execution=record)
+        tasks = type("Tasks", (), {"artifact_verified": lambda _: [task]})()
+        transaction = type("Tx", (), {"record_publication": lambda *_: None})()
+        artifacts = type("Artifacts", (), {"get": lambda *_: type("Record", (), {"artifact": type("Artifact", (), {"base_commit":spec.base_commit, "diff":b""})()})()})()
+        publisher = type("Publisher", (), {"publication_url_for": lambda *_: "https://github.com/a/b/pull/1", "publish": lambda *_a, **_k: self.fail("must not publish twice")})()
+        outcomes = VerifiedPublicationService(tasks, transaction, artifacts, lambda _: publisher).sweep()
+        self.assertEqual(outcomes, [("task", "PUBLISHED", "https://github.com/a/b/pull/1")])
     def test_uses_japanese_metadata_for_an_implementation_pr(self):
         self.assertEqual(
             publication_text("implementation"),
