@@ -13,7 +13,7 @@ class VerifiedPublicationServiceTest(unittest.TestCase):
         task = V3Task("task", spec, V3Status.ARTIFACT_VERIFIED, execution=record)
         tasks = type("Tasks", (), {"artifact_verified": lambda _: [task]})()
         transaction = type("Tx", (), {"record_publication": lambda *_: None})()
-        artifacts = type("Artifacts", (), {"get": lambda *_: type("Record", (), {"artifact": type("Artifact", (), {"base_commit":spec.base_commit, "diff":b""})()})()})()
+        artifacts = type("Artifacts", (), {"get": lambda *_: self.fail("must not read an artifact when a PR already exists")})()
         publisher = type("Publisher", (), {"publication_url_for": lambda *_: "https://github.com/a/b/pull/1", "publish": lambda *_a, **_k: self.fail("must not publish twice")})()
         outcomes = VerifiedPublicationService(tasks, transaction, artifacts, lambda _: publisher).sweep()
         self.assertEqual(outcomes, [("task", "PUBLISHED", "https://github.com/a/b/pull/1")])

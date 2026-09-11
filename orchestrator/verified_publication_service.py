@@ -48,8 +48,6 @@ class VerifiedPublicationService:
             if record is None:
                 outcomes.append((task.task_id, "PUBLICATION_STATE_INVALID", None)); continue
             try:
-                artifact = self._artifacts.get(record.execution_id).artifact
-                title, body = publication_text(task.spec.requested_action)
                 publisher = self._publisher_for_task(task)
                 # Publication is recover-first.  A transport loss after
                 # GitHub created a PR must converge on that PR, never create
@@ -57,6 +55,8 @@ class VerifiedPublicationService:
                 lookup = getattr(publisher, "publication_url_for", None)
                 url = lookup(task.task_id, record.execution_id) if callable(lookup) else None
                 if url is None:
+                    artifact = self._artifacts.get(record.execution_id).artifact
+                    title, body = publication_text(task.spec.requested_action)
                     url = publisher.publish(
                         task_id=task.task_id, execution_id=record.execution_id,
                         base_commit=artifact.base_commit, diff=artifact.diff,

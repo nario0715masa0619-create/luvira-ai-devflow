@@ -202,14 +202,19 @@ class GitHubVerifiedPublisher:
             return "OPEN"
         raise VerifiedPublicationError("publication_pull_state_invalid")
 
-    def publication_url_for(self, task_id: str, execution_id: str) -> str:
-        """Recover the one deterministic PR created by older durable records."""
+    def publication_url_for(self, task_id: str, execution_id: str) -> str | None:
+        """Return an existing deterministic PR, or ``None`` before first publication."""
         branch = f"luvira/{task_id[:32]}-{execution_id[:12]}"
         owner = self.repository.split("/", 1)[0]
         pulls = self._call(
             "GET", f"/repos/{quote(self.repository, safe='/')}/pulls?state=all&head={quote(owner + ':' + branch, safe='')}",
             list_response=True,
         )
+        # No matching PR is the normal first-publication state.  It must not
+        # be treated as a reconciliation failure, otherwise every verified
+        # artifact is prevented from ever reaching ``publish``.
+        if not pulls:
+            return None
         if len(pulls) != 1 or not isinstance(pulls[0], dict):
             raise VerifiedPublicationError("publication_pull_not_unique")
         url = pulls[0].get("html_url")
