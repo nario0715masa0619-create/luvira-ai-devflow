@@ -12,6 +12,11 @@ OIDCの信頼条件はリポジトリ、workflow名、`human-approval` Environme
 
 ## 承認する前の確認
 
+`Authorize approved DevFlow task` は、保護承認を要求する前に Issue Form
+が Control Plane で受理済みかを自動確認する。ここで失敗した場合は、GitHub
+環境の承認を行わず、Issue の `ai-approval` ラベル、必須項目、出力許可パス、
+参照許可パスを修正してから再実行する。
+
 1. Issue Formの対象リポジトリ、ベースコミット、予算、受入条件、禁止事項が正しいこと。
 2. Control Planeが返した `task_id` と `approval_binding` が対象Issueの値と一致すること。
 3. 実装を許可する判断が明確に人間からなされていること。
