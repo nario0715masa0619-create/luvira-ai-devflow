@@ -65,7 +65,7 @@ def create_v3_queue_from_environment():
         source_token_for_repository=lambda _repository: github_worker_installation_token(),
         # Resolve at watchdog execution time; this module composes its private
         # runtime before the helper functions below are defined.
-        worker_identity_available=lambda: github_worker_identity_available(),
+        worker_identity_available=lambda: github_worker_alerting_available(),
         runtime_incident_reporter=lambda checks: create_runtime_incident(checks),
         artifact_bucket=WORKER_ARTIFACT_BUCKET,
         artifact_view=WORKER_ARTIFACT_VIEW,
@@ -276,7 +276,7 @@ def opencode_go_readiness():
 
 @app.get("/readiness/github-worker")
 def github_worker_readiness():
-    """Verify the Worker App identity without creating a token, branch, or PR."""
+    """Verify the Worker App identity and alert-token read access without writes."""
     app_id = os.environ.get("GITHUB_WORKER_APP_ID", "")
     installation_id = os.environ.get("GITHUB_WORKER_INSTALLATION_ID", "")
     private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
@@ -297,10 +297,20 @@ def github_worker_readiness():
     if (installation.get("permissions") or {}).get("issues") != "write":
         logging.warning("GITHUB_WORKER_BLOCKED incident permission is not configured")
         return jsonify(status="BLOCKED", reason="github_worker_issues_write_required"), 503
+    try:
+        repository = github_api_request(
+            f"{GITHUB_API_URL}/repos/{EXPECTED_REPOSITORY}", token=github_worker_installation_token(),
+        )
+    except (HTTPError, URLError, TimeoutError, ValueError, jwt.PyJWTError):
+        logging.warning("GITHUB_WORKER_BLOCKED alert token repository probe failed")
+        return jsonify(status="BLOCKED", reason="github_worker_alert_token_unavailable"), 503
+    if repository.get("full_name") != EXPECTED_REPOSITORY:
+        logging.warning("GITHUB_WORKER_BLOCKED alert token repository mismatch")
+        return jsonify(status="BLOCKED", reason="github_worker_alert_repository_mismatch"), 503
 
     logging.info("GITHUB_WORKER_READY installation_id=%s account=%s", installation_id, account)
     return jsonify(status="READY", provider="github-worker", installation_id=int(installation_id), account=account,
-                   incident_alerting="issues-write")
+                   incident_alerting="issues-write-token-ready")
 
 
 @app.post("/worker/eligibility")
@@ -533,6 +543,16 @@ def github_worker_identity_available():
     return (installation.get("id") == int(installation_id)
             and account == expected_account
             and (installation.get("permissions") or {}).get("issues") == "write")
+
+
+def github_worker_alerting_available():
+    """Prove the alerting token can read its intended repository, never write it."""
+    if not github_worker_identity_available():
+        return False
+    repository = github_api_request(
+        f"{GITHUB_API_URL}/repos/{EXPECTED_REPOSITORY}", token=github_worker_installation_token(),
+    )
+    return repository.get("full_name") == EXPECTED_REPOSITORY
 
 
 def create_runtime_incident(checks):

@@ -13,6 +13,7 @@ class DeployRuntimeReadinessGateTest(unittest.TestCase):
         self.assertIn('"$SERVICE_URL/readiness/opencode-go"', workflow)
         self.assertIn('"$SERVICE_URL/readiness/github-worker"', workflow)
         self.assertIn("incident_alerting", workflow)
+        self.assertIn("issues-write-token-ready", workflow)
         self.assertIn('"$opencode")" -gt 0', workflow)
         self.assertIn('"$github_worker")" = "nario0715masa0619-create"', workflow)
 
