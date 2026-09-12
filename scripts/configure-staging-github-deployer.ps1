@@ -24,9 +24,18 @@ if ($ProjectId -eq 'luvira-ai-control-plane') {
 
 function Invoke-Gcloud {
     param([string[]]$Arguments)
-    $result = & gcloud @Arguments 2>&1
-    if ($LASTEXITCODE -ne 0) { throw ($result -join "`n") }
-    return ($result -join "`n")
+    # IAM policy bindings are optimistic read-modify-write updates.  Another
+    # binding in this same setup can legitimately update the ETag first, so
+    # retry only that transient conflict with bounded backoff.
+    for ($attempt = 1; $attempt -le 5; $attempt++) {
+        $result = & gcloud @Arguments 2>&1
+        if ($LASTEXITCODE -eq 0) { return ($result -join "`n") }
+        $message = $result -join "`n"
+        if ($message -notmatch 'subject of a conflict|ETag.*did not match' -or $attempt -eq 5) {
+            throw $message
+        }
+        Start-Sleep -Seconds ([math]::Pow(2, $attempt - 1))
+    }
 }
 
 function Test-GcloudResource {
