@@ -27,6 +27,13 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
         self.assertIn("PUBLIC_WEBHOOK_INGRESS_ONLY=true", workflow)
         self.assertIn("EXPECTED_REPOSITORY=$STAGING_REPOSITORY", workflow)
         self.assertIn("github-webhook-signing-secret-staging", (ROOT / "scripts" / "prepare-staging-environment.ps1").read_text(encoding="utf-8"))
+
+    def test_staging_open_code_binding_is_a_complete_shell_block_before_ingress(self):
+        workflow = (ROOT / ".github" / "workflows" / "deploy-staging.yml").read_text(encoding="utf-8")
+        binding_start = workflow.index('if [ "${{ vars.STAGING_OPENCODE_ENABLED }}" = "true" ]; then')
+        ingress_step = workflow.index('      - name: Deploy staging-only GitHub webhook ingress')
+        binding_end = workflow.index("          fi", binding_start)
+        self.assertLess(binding_end, ingress_step)
         self.assertIn('"$SERVICE_URL/readiness/opencode-go"', workflow)
         self.assertIn("'.model_count'", workflow)
         self.assertNotIn('opencode-go-api-key-devflow', workflow)
