@@ -22,7 +22,8 @@ $missing = @($requiredApis | Where-Object { $_ -notin $enabled })
 $projectNumber = (& gcloud projects describe $ProjectId --format='value(projectNumber)').Trim()
 $bucket = "luvira-devflow-staging-$projectNumber"
 $repository = & gcloud artifacts repositories describe luvira-devflow --location $Region --project $ProjectId --format='value(name)' 2>$null
-$bucketExists = (& gcloud storage buckets describe "gs://$bucket" --project $ProjectId --format='value(name)' 2>$null) -eq "gs://$bucket"
+& gcloud storage buckets describe "gs://$bucket" --project $ProjectId *> $null
+$bucketExists = $LASTEXITCODE -eq 0
 $firestore = & gcloud firestore databases describe --database='(default)' --project $ProjectId --format='value(name)' 2>$null
 $ready = $missing.Count -eq 0 -and $repository -and $bucketExists -and $firestore
 
