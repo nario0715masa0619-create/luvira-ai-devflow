@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import hmac
 import json
 import logging
@@ -18,6 +19,8 @@ from v3_runtime import create_v3_queue_service
 from v3_control_plane import V3ControlPlane, V3ControlPlaneError
 from execution_platform import V3Status, task_spec_hash
 from autonomous_broker import AutonomousBroker
+from implementation_artifact_verifier import verify_implementation_artifact, ImplementationArtifactError
+from opencode_implementation_client import OpenCodeImplementationClient, OpenCodeImplementationError
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -286,6 +289,42 @@ def opencode_go_readiness():
 
     logging.info("OPENCODE_GO_READY model_count=%s", model_count)
     return jsonify(status="READY", provider="opencode-go", model_count=model_count)
+
+
+@app.post("/internal/staging/opencode-generation-canary")
+def staging_opencode_generation_canary():
+    """Run one opt-in, write-free provider canary in a staging revision only."""
+    if os.environ.get("STAGING_OPENCODE_CANARY_ENABLED", "").lower() != "true":
+        return jsonify(status="BLOCKED", reason="staging_generation_canary_disabled"), 404
+    api_key = os.environ.get("OPENCODE_GO_API_KEY", "")
+    if not api_key:
+        return jsonify(status="BLOCKED", reason="opencode_go_not_configured"), 503
+    envelope = {
+        "task_id": "staging-opencode-generation-canary",
+        "spec_hash": hashlib.sha256(b"staging-opencode-generation-canary-v1").hexdigest(),
+        "base_commit": "0" * 40,
+        "allowed_paths": ["canary/"],
+        "acceptance_criteria": [
+            "Create exactly one UTF-8 Markdown file under canary/.",
+            "The file must state that it is a staging-only OpenCode generation canary.",
+        ],
+    }
+    try:
+        payload = OpenCodeImplementationClient(api_key).generate_artifact(
+            model=OPENCODE_IMPLEMENTATION_MODEL,
+            envelope=envelope,
+            source_snapshot=b"This is an empty, staging-only canary source snapshot.\n",
+        )
+        verified = verify_implementation_artifact(
+            payload, envelope, baseline_paths=(), baseline_files=(),
+        )
+    except OpenCodeImplementationError as exc:
+        return jsonify(status="BLOCKED", reason=exc.code), 503
+    except ImplementationArtifactError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 503
+    # Do not retain provider output, source data, or a publishable artifact.
+    # Only the verified path count proves the complete provider/verifier path.
+    return jsonify(status="READY", artifact="VERIFIED", changed_path_count=len(verified.changed_paths))
 
 
 @app.get("/readiness/github-worker")
