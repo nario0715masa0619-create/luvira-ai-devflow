@@ -72,6 +72,7 @@ if (-not (Test-GcloudResource @('iam', 'workload-identity-pools', 'providers', '
 }
 
 Invoke-PlanOrApply @('iam', 'service-accounts', 'add-iam-policy-binding', $deployerAccount, '--project', $ProjectId, '--role=roles/iam.workloadIdentityUser', "--member=$principal")
+Invoke-PlanOrApply @('iam', 'service-accounts', 'add-iam-policy-binding', $deployerAccount, '--project', $ProjectId, '--role=roles/iam.serviceAccountOpenIdTokenCreator', "--member=$principal")
 foreach ($role in @('roles/artifactregistry.admin', 'roles/cloudbuild.editor', 'roles/iam.serviceAccountUser', 'roles/run.admin', 'roles/serviceusage.serviceUsageConsumer', 'roles/storage.bucketViewer')) {
     Invoke-PlanOrApply @('projects', 'add-iam-policy-binding', $ProjectId, "--member=serviceAccount:$deployerAccount", "--role=$role")
 }
