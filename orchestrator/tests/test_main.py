@@ -55,6 +55,32 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json["reason"], "opencode_go_not_configured")
 
+    def test_staging_generation_canary_is_opt_in_and_does_not_publish(self):
+        artifact = {
+            "schema": "luvira.devflow.implementation-artifact.v2",
+            "task_id": "staging-opencode-generation-canary",
+            "spec_hash": hashlib.sha256(b"staging-opencode-generation-canary-v1").hexdigest(),
+            "base_commit": "0" * 40,
+            "files": [{"path": "canary/staging-opencode-canary.md", "content": "# staging-only OpenCode generation canary\n"}],
+            "changed_paths": ["canary/staging-opencode-canary.md"],
+            "tests": [],
+            "publication": "verification-only",
+        }
+        payload = json.dumps(artifact).encode()
+        client = unittest.mock.Mock()
+        client.generate_artifact.return_value = payload
+        with patch.dict(os.environ, {"STAGING_OPENCODE_CANARY_ENABLED": "true", "OPENCODE_GO_API_KEY": "test-key"}):
+            with patch("main.OpenCodeImplementationClient", return_value=client):
+                response = self.client.post("/internal/staging/opencode-generation-canary")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {"status": "READY", "artifact": "VERIFIED", "changed_path_count": 1})
+
+    def test_staging_generation_canary_is_disabled_by_default(self):
+        with patch.dict(os.environ, {"STAGING_OPENCODE_CANARY_ENABLED": ""}, clear=False):
+            response = self.client.post("/internal/staging/opencode-generation-canary")
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json["reason"], "staging_generation_canary_disabled")
+
     def test_control_plane_readiness_blocks_without_deployed_store(self):
         response = self.client.get("/readiness/control-plane")
 
