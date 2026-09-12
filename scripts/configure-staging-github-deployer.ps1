@@ -53,6 +53,7 @@ $deployerAccount = "devflow-deployer-staging@$ProjectId.iam.gserviceaccount.com"
 $orchestratorAccount = "devflow-orchestrator-staging@$ProjectId.iam.gserviceaccount.com"
 $principal = "principalSet://iam.googleapis.com/projects/$projectNumber/locations/global/workloadIdentityPools/$pool/attribute.repository/$repository"
 $condition = "assertion.repository == '$repository' && assertion.ref == 'refs/heads/main' && assertion.workflow == 'Deploy DevFlow staging'"
+$sourceBucket = "luvira-devflow-staging-source-$projectNumber"
 
 if (-not (Test-GcloudResource @('iam', 'workload-identity-pools', 'describe', $pool, '--project', $ProjectId, '--location', 'global'))) {
     Invoke-PlanOrApply @('iam', 'workload-identity-pools', 'create', $pool, '--project', $ProjectId, '--location', 'global', '--display-name=GitHub Actions')
@@ -68,6 +69,7 @@ foreach ($role in @('roles/artifactregistry.admin', 'roles/cloudbuild.editor', '
 foreach ($role in @('roles/datastore.user', 'roles/logging.viewer', 'roles/run.developer', 'roles/storage.objectViewer')) {
     Invoke-PlanOrApply @('projects', 'add-iam-policy-binding', $ProjectId, "--member=serviceAccount:$orchestratorAccount", "--role=$role")
 }
+Invoke-PlanOrApply @('storage', 'buckets', 'add-iam-policy-binding', "gs://$sourceBucket", "--member=serviceAccount:$deployerAccount", '--role=roles/storage.objectAdmin')
 
 [pscustomobject][ordered]@{
     staging_wif_provider = "projects/$projectNumber/locations/global/workloadIdentityPools/$pool/providers/$provider"

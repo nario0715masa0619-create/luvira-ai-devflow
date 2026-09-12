@@ -53,6 +53,7 @@ if ([string]::IsNullOrWhiteSpace($projectNumber)) { throw 'ステージングプ
 
 $artifactRepository = 'luvira-devflow'
 $artifactBucket = "luvira-devflow-staging-$projectNumber"
+$sourceBucket = "luvira-devflow-staging-source-$projectNumber"
 $orchestratorServiceAccountId = 'devflow-orchestrator-staging'
 $workerServiceAccountId = 'devflow-worker-staging'
 $deployerServiceAccountId = 'devflow-deployer-staging'
@@ -67,6 +68,7 @@ $deployerServiceAccount = "$deployerServiceAccountId@$ProjectId.iam.gserviceacco
 
 Write-Host "対象: $ProjectId ($Region)"
 Write-Host "成果物バケット: gs://$artifactBucket"
+Write-Host "ビルドソースバケット: gs://$sourceBucket"
 Write-Host 'この操作は本番・GitHub・既存タスクには変更を加えません。'
 
 Invoke-GcloudApply @('services', 'enable', 'run.googleapis.com', 'cloudbuild.googleapis.com', 'artifactregistry.googleapis.com', 'firestore.googleapis.com', 'storage.googleapis.com', '--project', $ProjectId)
@@ -75,6 +77,9 @@ if (-not (Test-GcloudResource @('artifacts', 'repositories', 'describe', $artifa
 }
 if (-not (Test-GcloudResource @('storage', 'buckets', 'describe', "gs://$artifactBucket", '--project', $ProjectId))) {
     Invoke-GcloudApply @('storage', 'buckets', 'create', "gs://$artifactBucket", '--location', $Region, '--project', $ProjectId, '--uniform-bucket-level-access')
+}
+if (-not (Test-GcloudResource @('storage', 'buckets', 'describe', "gs://$sourceBucket", '--project', $ProjectId))) {
+    Invoke-GcloudApply @('storage', 'buckets', 'create', "gs://$sourceBucket", '--location', $Region, '--project', $ProjectId, '--uniform-bucket-level-access')
 }
 if (-not (Test-GcloudResource @('firestore', 'databases', 'describe', '--database=(default)', '--project', $ProjectId))) {
     Invoke-GcloudApply @('firestore', 'databases', 'create', '--database=(default)', '--location', $Region, '--type=firestore-native', '--project', $ProjectId)
@@ -96,6 +101,7 @@ Write-Host '次の入力値（GitHub Environment: staging）:'
     GCP_REGION = $Region
     GCP_ARTIFACT_REPOSITORY = $artifactRepository
     STAGING_ARTIFACT_BUCKET = $artifactBucket
+    STAGING_SOURCE_BUCKET = $sourceBucket
     STAGING_ORCHESTRATOR_SERVICE_ACCOUNT = $orchestratorServiceAccount
     STAGING_WORKER_SERVICE_ACCOUNT = $workerServiceAccount
     STAGING_DEPLOYER_SERVICE_ACCOUNT = $deployerServiceAccount
