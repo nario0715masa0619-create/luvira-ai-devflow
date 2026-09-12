@@ -17,6 +17,16 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
         self.assertIn('OPENCODE_GO_API_KEY=opencode-go-api-key-staging:latest', workflow)
         self.assertIn('--remove-secrets OPENCODE_GO_API_KEY', workflow)
         self.assertIn("if: vars.STAGING_OPENCODE_ENABLED == 'true'", workflow)
+
+    def test_staging_github_ingress_is_opt_in_and_uses_only_staging_identity(self):
+        workflow = (ROOT / ".github" / "workflows" / "deploy-staging.yml").read_text(encoding="utf-8")
+        self.assertIn("if: vars.STAGING_GITHUB_INTEGRATION_ENABLED == 'true'", workflow)
+        self.assertIn("luvira-devflow-github-ingress-staging", workflow)
+        self.assertIn("vars.STAGING_WEBHOOK_SERVICE_ACCOUNT", workflow)
+        self.assertIn("vars.STAGING_GITHUB_WEBHOOK_SECRET", workflow)
+        self.assertIn("PUBLIC_WEBHOOK_INGRESS_ONLY=true", workflow)
+        self.assertIn("EXPECTED_REPOSITORY=$STAGING_REPOSITORY", workflow)
+        self.assertIn("github-webhook-signing-secret-staging", (ROOT / "scripts" / "prepare-staging-environment.ps1").read_text(encoding="utf-8"))
         self.assertIn('"$SERVICE_URL/readiness/opencode-go"', workflow)
         self.assertIn("'.model_count'", workflow)
         self.assertNotIn('opencode-go-api-key-devflow', workflow)

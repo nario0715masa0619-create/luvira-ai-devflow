@@ -57,7 +57,8 @@ $sourceBucket = "luvira-devflow-staging-source-$projectNumber"
 $orchestratorServiceAccountId = 'devflow-orchestrator-staging'
 $workerServiceAccountId = 'devflow-worker-staging'
 $deployerServiceAccountId = 'devflow-deployer-staging'
-foreach ($serviceAccountId in @($orchestratorServiceAccountId, $workerServiceAccountId, $deployerServiceAccountId)) {
+$webhookServiceAccountId = 'devflow-github-webhook-staging'
+foreach ($serviceAccountId in @($orchestratorServiceAccountId, $workerServiceAccountId, $deployerServiceAccountId, $webhookServiceAccountId)) {
     if ($serviceAccountId.Length -lt 6 -or $serviceAccountId.Length -gt 30) {
         throw "サービスアカウントIDの長さがGCP制限外です: $serviceAccountId"
     }
@@ -65,6 +66,7 @@ foreach ($serviceAccountId in @($orchestratorServiceAccountId, $workerServiceAcc
 $orchestratorServiceAccount = "$orchestratorServiceAccountId@$ProjectId.iam.gserviceaccount.com"
 $workerServiceAccount = "$workerServiceAccountId@$ProjectId.iam.gserviceaccount.com"
 $deployerServiceAccount = "$deployerServiceAccountId@$ProjectId.iam.gserviceaccount.com"
+$webhookServiceAccount = "$webhookServiceAccountId@$ProjectId.iam.gserviceaccount.com"
 
 Write-Host "対象: $ProjectId ($Region)"
 Write-Host "成果物バケット: gs://$artifactBucket"
@@ -87,6 +89,9 @@ if (-not (Test-GcloudResource @('firestore', 'databases', 'describe', '--databas
 if (-not (Test-GcloudResource @('secrets', 'describe', 'opencode-go-api-key-staging', '--project', $ProjectId))) {
     Invoke-GcloudApply @('secrets', 'create', 'opencode-go-api-key-staging', '--project', $ProjectId, '--replication-policy=automatic', '--labels=environment=staging,component=devflow')
 }
+if (-not (Test-GcloudResource @('secrets', 'describe', 'github-webhook-signing-secret-staging', '--project', $ProjectId))) {
+    Invoke-GcloudApply @('secrets', 'create', 'github-webhook-signing-secret-staging', '--project', $ProjectId, '--replication-policy=automatic', '--labels=environment=staging,component=devflow')
+}
 if (-not (Test-GcloudResource @('iam', 'service-accounts', 'describe', $orchestratorServiceAccount, '--project', $ProjectId))) {
     Invoke-GcloudApply @('iam', 'service-accounts', 'create', $orchestratorServiceAccountId, '--project', $ProjectId, '--display-name=DevFlow staging orchestrator')
 }
@@ -95,6 +100,9 @@ if (-not (Test-GcloudResource @('iam', 'service-accounts', 'describe', $workerSe
 }
 if (-not (Test-GcloudResource @('iam', 'service-accounts', 'describe', $deployerServiceAccount, '--project', $ProjectId))) {
     Invoke-GcloudApply @('iam', 'service-accounts', 'create', $deployerServiceAccountId, '--project', $ProjectId, '--display-name=DevFlow staging deployer')
+}
+if (-not (Test-GcloudResource @('iam', 'service-accounts', 'describe', $webhookServiceAccount, '--project', $ProjectId))) {
+    Invoke-GcloudApply @('iam', 'service-accounts', 'create', $webhookServiceAccountId, '--project', $ProjectId, '--display-name=DevFlow staging GitHub webhook ingress')
 }
 
 Write-Host ''
@@ -108,12 +116,15 @@ Write-Host '次の入力値（GitHub Environment: staging）:'
     STAGING_ORCHESTRATOR_SERVICE_ACCOUNT = $orchestratorServiceAccount
     STAGING_WORKER_SERVICE_ACCOUNT = $workerServiceAccount
     STAGING_DEPLOYER_SERVICE_ACCOUNT = $deployerServiceAccount
+    STAGING_WEBHOOK_SERVICE_ACCOUNT = $webhookServiceAccount
     V3_TASK_COLLECTION = 'devflow_staging_execution_tasks'
     V3_VERIFIED_ARTIFACT_COLLECTION = 'devflow_staging_verified_artifacts'
     V3_IMPLEMENTATION_ARTIFACT_COLLECTION = 'devflow_staging_verified_implementation_artifacts'
     V3_RUNTIME_HEALTH_COLLECTION = 'devflow_staging_runtime_health'
     STAGING_OPENCODE_ENABLED = 'false'
     STAGING_OPENCODE_SECRET = 'opencode-go-api-key-staging (値はここへ保存し、GitHubへは保存しない)'
+    STAGING_GITHUB_INTEGRATION_ENABLED = 'false'
+    STAGING_GITHUB_WEBHOOK_SECRET = 'github-webhook-signing-secret-staging (値はここへ保存し、GitHubへは保存しない)'
 } | Format-List
 
 if (-not $Apply) {
