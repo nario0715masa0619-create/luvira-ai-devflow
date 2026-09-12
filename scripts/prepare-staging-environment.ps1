@@ -53,9 +53,17 @@ if ([string]::IsNullOrWhiteSpace($projectNumber)) { throw 'ステージングプ
 
 $artifactRepository = 'luvira-devflow'
 $artifactBucket = "luvira-devflow-staging-$projectNumber"
-$orchestratorServiceAccount = "devflow-orchestrator-staging@$ProjectId.iam.gserviceaccount.com"
-$workerServiceAccount = "devflow-isolated-worker-staging@$ProjectId.iam.gserviceaccount.com"
-$deployerServiceAccount = "devflow-deployer-staging@$ProjectId.iam.gserviceaccount.com"
+$orchestratorServiceAccountId = 'devflow-orchestrator-staging'
+$workerServiceAccountId = 'devflow-worker-staging'
+$deployerServiceAccountId = 'devflow-deployer-staging'
+foreach ($serviceAccountId in @($orchestratorServiceAccountId, $workerServiceAccountId, $deployerServiceAccountId)) {
+    if ($serviceAccountId.Length -lt 6 -or $serviceAccountId.Length -gt 30) {
+        throw "サービスアカウントIDの長さがGCP制限外です: $serviceAccountId"
+    }
+}
+$orchestratorServiceAccount = "$orchestratorServiceAccountId@$ProjectId.iam.gserviceaccount.com"
+$workerServiceAccount = "$workerServiceAccountId@$ProjectId.iam.gserviceaccount.com"
+$deployerServiceAccount = "$deployerServiceAccountId@$ProjectId.iam.gserviceaccount.com"
 
 Write-Host "対象: $ProjectId ($Region)"
 Write-Host "成果物バケット: gs://$artifactBucket"
@@ -72,13 +80,13 @@ if (-not (Test-GcloudResource @('firestore', 'databases', 'describe', '--databas
     Invoke-GcloudApply @('firestore', 'databases', 'create', '--database=(default)', '--location', $Region, '--type=firestore-native', '--project', $ProjectId)
 }
 if (-not (Test-GcloudResource @('iam', 'service-accounts', 'describe', $orchestratorServiceAccount, '--project', $ProjectId))) {
-    Invoke-GcloudApply @('iam', 'service-accounts', 'create', 'devflow-orchestrator-staging', '--project', $ProjectId, '--display-name=DevFlow staging orchestrator')
+    Invoke-GcloudApply @('iam', 'service-accounts', 'create', $orchestratorServiceAccountId, '--project', $ProjectId, '--display-name=DevFlow staging orchestrator')
 }
 if (-not (Test-GcloudResource @('iam', 'service-accounts', 'describe', $workerServiceAccount, '--project', $ProjectId))) {
-    Invoke-GcloudApply @('iam', 'service-accounts', 'create', 'devflow-isolated-worker-staging', '--project', $ProjectId, '--display-name=DevFlow staging isolated worker')
+    Invoke-GcloudApply @('iam', 'service-accounts', 'create', $workerServiceAccountId, '--project', $ProjectId, '--display-name=DevFlow staging isolated worker')
 }
 if (-not (Test-GcloudResource @('iam', 'service-accounts', 'describe', $deployerServiceAccount, '--project', $ProjectId))) {
-    Invoke-GcloudApply @('iam', 'service-accounts', 'create', 'devflow-deployer-staging', '--project', $ProjectId, '--display-name=DevFlow staging deployer')
+    Invoke-GcloudApply @('iam', 'service-accounts', 'create', $deployerServiceAccountId, '--project', $ProjectId, '--display-name=DevFlow staging deployer')
 }
 
 Write-Host ''
