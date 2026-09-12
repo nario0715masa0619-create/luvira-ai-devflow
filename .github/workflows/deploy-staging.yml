@@ -31,8 +31,19 @@ jobs:
           set -euo pipefail
           ORCHESTRATOR_IMAGE="${{ vars.STAGING_REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/luvira-devflow/luvira-devflow-orchestrator-staging:${GITHUB_SHA}"
           WORKER_IMAGE="${{ vars.STAGING_REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/luvira-devflow/luvira-devflow-isolated-worker-staging:${GITHUB_SHA}"
-          gcloud builds submit orchestrator --tag "$ORCHESTRATOR_IMAGE" --project "${{ vars.STAGING_PROJECT_ID }}" --gcs-source-staging-dir "gs://${{ vars.STAGING_SOURCE_BUCKET }}/orchestrator" --quiet
-          gcloud builds submit . --config worker/cloudbuild.bootstrap.yaml --substitutions "_IMAGE=$WORKER_IMAGE" --project "${{ vars.STAGING_PROJECT_ID }}" --gcs-source-staging-dir "gs://${{ vars.STAGING_SOURCE_BUCKET }}/worker" --quiet
+          submit_and_wait() {
+            build_id="$(gcloud builds submit "$@" --project "${{ vars.STAGING_PROJECT_ID }}" --async --quiet --format='value(id)')"
+            for attempt in $(seq 1 120); do
+              status="$(gcloud builds describe "$build_id" --project "${{ vars.STAGING_PROJECT_ID }}" --format='value(status)')"
+              [ "$status" = "SUCCESS" ] && return 0
+              case "$status" in FAILURE|CANCELLED|EXPIRED|TIMEOUT) return 1 ;; esac
+              sleep 5
+            done
+            echo "Cloud Build did not finish within 10 minutes: $build_id" >&2
+            return 1
+          }
+          submit_and_wait orchestrator --tag "$ORCHESTRATOR_IMAGE" --gcs-source-staging-dir "gs://${{ vars.STAGING_SOURCE_BUCKET }}/orchestrator"
+          submit_and_wait . --config worker/cloudbuild.bootstrap.yaml --substitutions "_IMAGE=$WORKER_IMAGE" --gcs-source-staging-dir "gs://${{ vars.STAGING_SOURCE_BUCKET }}/worker"
       - name: Deploy private staging orchestrator
         run: |
           set -euo pipefail
