@@ -60,6 +60,7 @@ $pool = 'github-actions'
 $provider = 'github-deployer'
 $deployerAccount = "devflow-deployer-staging@$ProjectId.iam.gserviceaccount.com"
 $orchestratorAccount = "devflow-orchestrator-staging@$ProjectId.iam.gserviceaccount.com"
+$webhookAccount = "devflow-github-webhook-staging@$ProjectId.iam.gserviceaccount.com"
 $principal = "principalSet://iam.googleapis.com/projects/$projectNumber/locations/global/workloadIdentityPools/$pool/attribute.repository/$repository"
 $condition = "assertion.repository == '$repository' && assertion.ref == 'refs/heads/main' && assertion.workflow == 'Deploy DevFlow staging'"
 $sourceBucket = "luvira-devflow-staging-source-$projectNumber"
@@ -80,6 +81,7 @@ foreach ($role in @('roles/datastore.user', 'roles/logging.viewer', 'roles/run.d
     Invoke-PlanOrApply @('projects', 'add-iam-policy-binding', $ProjectId, "--member=serviceAccount:$orchestratorAccount", "--role=$role")
 }
 Invoke-PlanOrApply @('secrets', 'add-iam-policy-binding', 'opencode-go-api-key-staging', '--project', $ProjectId, "--member=serviceAccount:$orchestratorAccount", '--role=roles/secretmanager.secretAccessor')
+Invoke-PlanOrApply @('secrets', 'add-iam-policy-binding', 'github-webhook-signing-secret-staging', '--project', $ProjectId, "--member=serviceAccount:$webhookAccount", '--role=roles/secretmanager.secretAccessor')
 Invoke-PlanOrApply @('storage', 'buckets', 'add-iam-policy-binding', "gs://$sourceBucket", "--member=serviceAccount:$deployerAccount", '--role=roles/storage.objectAdmin')
 
 [pscustomobject][ordered]@{
@@ -87,6 +89,7 @@ Invoke-PlanOrApply @('storage', 'buckets', 'add-iam-policy-binding', "gs://$sour
     staging_deployer_service_account = $deployerAccount
     staging_orchestrator_service_account = $orchestratorAccount
     staging_worker_service_account = "devflow-worker-staging@$ProjectId.iam.gserviceaccount.com"
+    staging_webhook_service_account = $webhookAccount
 } | Format-List
 
 if (-not $Apply) { Write-Host '計画のみ完了しました。実設定は -Apply を付けて実行してください。' }
