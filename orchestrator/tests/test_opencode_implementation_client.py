@@ -49,6 +49,18 @@ def full_file_artifact_events():
 
 
 class OpenCodeImplementationClientTest(unittest.TestCase):
+    def test_unconfigured_client_fails_only_when_an_implementation_is_requested(self):
+        transport = lambda *_args, **_kwargs: self.fail("provider must not be contacted")
+        client = OpenCodeImplementationClient("", transport)
+
+        with self.assertRaisesRegex(OpenCodeImplementationError, "OPENCODE_NOT_CONFIGURED"):
+            client.generate_artifact(
+                model="kimi-k2.6",
+                envelope={"task_id":"t", "spec_hash":"a" * 64, "base_commit":"b" * 40,
+                          "allowed_paths":["src/"], "acceptance_criteria":["test"]},
+                source_snapshot=b"x",
+            )
+
     def test_returns_only_provider_artifact_json_without_exposing_key(self):
         calls = []
         def transport(request, timeout):

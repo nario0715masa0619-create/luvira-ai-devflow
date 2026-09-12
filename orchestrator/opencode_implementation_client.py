@@ -74,12 +74,17 @@ class OpenCodeImplementationClient:
 
     def __init__(self, api_key: str, transport: Transport = urlopen,
                  clock: Callable[[], float] = time.monotonic):
-        if not isinstance(api_key, str) or not api_key:
+        if not isinstance(api_key, str):
             raise OpenCodeImplementationError("OPENCODE_NOT_CONFIGURED")
         self._api_key, self._transport, self._clock = api_key, transport, clock
 
     def generate_artifact(self, *, model: str, envelope: dict[str, Any], source_snapshot: bytes,
                           on_progress: Callable[[int], None] | None = None) -> bytes:
+        # Provider credentials are an execution boundary, not a control-plane
+        # boot prerequisite.  This lets an isolated staging control plane run
+        # validation and readiness checks without carrying a production key.
+        if not self._api_key:
+            raise OpenCodeImplementationError("OPENCODE_NOT_CONFIGURED")
         if not isinstance(model, str) or not model or not isinstance(source_snapshot, bytes) or len(source_snapshot) > MAX_SOURCE_BYTES:
             raise OpenCodeImplementationError("IMPLEMENTATION_INPUT_INVALID")
         try:
