@@ -79,6 +79,7 @@ foreach ($role in @('roles/artifactregistry.admin', 'roles/cloudbuild.editor', '
 foreach ($role in @('roles/datastore.user', 'roles/logging.viewer', 'roles/run.developer', 'roles/storage.objectViewer')) {
     Invoke-PlanOrApply @('projects', 'add-iam-policy-binding', $ProjectId, "--member=serviceAccount:$orchestratorAccount", "--role=$role")
 }
+Invoke-PlanOrApply @('secrets', 'add-iam-policy-binding', 'opencode-go-api-key-staging', '--project', $ProjectId, "--member=serviceAccount:$orchestratorAccount", '--role=roles/secretmanager.secretAccessor')
 Invoke-PlanOrApply @('storage', 'buckets', 'add-iam-policy-binding', "gs://$sourceBucket", "--member=serviceAccount:$deployerAccount", '--role=roles/storage.objectAdmin')
 
 [pscustomobject][ordered]@{

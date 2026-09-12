@@ -71,7 +71,7 @@ Write-Host "成果物バケット: gs://$artifactBucket"
 Write-Host "ビルドソースバケット: gs://$sourceBucket"
 Write-Host 'この操作は本番・GitHub・既存タスクには変更を加えません。'
 
-Invoke-GcloudApply @('services', 'enable', 'run.googleapis.com', 'cloudbuild.googleapis.com', 'artifactregistry.googleapis.com', 'firestore.googleapis.com', 'storage.googleapis.com', '--project', $ProjectId)
+Invoke-GcloudApply @('services', 'enable', 'run.googleapis.com', 'cloudbuild.googleapis.com', 'artifactregistry.googleapis.com', 'firestore.googleapis.com', 'storage.googleapis.com', 'secretmanager.googleapis.com', '--project', $ProjectId)
 if (-not (Test-GcloudResource @('artifacts', 'repositories', 'describe', $artifactRepository, '--location', $Region, '--project', $ProjectId))) {
     Invoke-GcloudApply @('artifacts', 'repositories', 'create', $artifactRepository, '--repository-format=docker', '--location', $Region, '--project', $ProjectId, '--description=DevFlow staging images')
 }
@@ -83,6 +83,9 @@ if (-not (Test-GcloudResource @('storage', 'buckets', 'describe', "gs://$sourceB
 }
 if (-not (Test-GcloudResource @('firestore', 'databases', 'describe', '--database=(default)', '--project', $ProjectId))) {
     Invoke-GcloudApply @('firestore', 'databases', 'create', '--database=(default)', '--location', $Region, '--type=firestore-native', '--project', $ProjectId)
+}
+if (-not (Test-GcloudResource @('secrets', 'describe', 'opencode-go-api-key-staging', '--project', $ProjectId))) {
+    Invoke-GcloudApply @('secrets', 'create', 'opencode-go-api-key-staging', '--project', $ProjectId, '--replication-policy=automatic', '--labels=environment=staging,component=devflow')
 }
 if (-not (Test-GcloudResource @('iam', 'service-accounts', 'describe', $orchestratorServiceAccount, '--project', $ProjectId))) {
     Invoke-GcloudApply @('iam', 'service-accounts', 'create', $orchestratorServiceAccountId, '--project', $ProjectId, '--display-name=DevFlow staging orchestrator')
@@ -109,6 +112,8 @@ Write-Host '次の入力値（GitHub Environment: staging）:'
     V3_VERIFIED_ARTIFACT_COLLECTION = 'devflow_staging_verified_artifacts'
     V3_IMPLEMENTATION_ARTIFACT_COLLECTION = 'devflow_staging_verified_implementation_artifacts'
     V3_RUNTIME_HEALTH_COLLECTION = 'devflow_staging_runtime_health'
+    STAGING_OPENCODE_ENABLED = 'false'
+    STAGING_OPENCODE_SECRET = 'opencode-go-api-key-staging (値はここへ保存し、GitHubへは保存しない)'
 } | Format-List
 
 if (-not $Apply) {
