@@ -21,11 +21,14 @@ $enabled = @(& gcloud services list --enabled --project $ProjectId --format='val
 $missing = @($requiredApis | Where-Object { $_ -notin $enabled })
 $projectNumber = (& gcloud projects describe $ProjectId --format='value(projectNumber)').Trim()
 $bucket = "luvira-devflow-staging-$projectNumber"
+$sourceBucket = "luvira-devflow-staging-source-$projectNumber"
 $repository = & gcloud artifacts repositories describe luvira-devflow --location $Region --project $ProjectId --format='value(name)' 2>$null
 & gcloud storage buckets describe "gs://$bucket" --project $ProjectId *> $null
 $bucketExists = $LASTEXITCODE -eq 0
+& gcloud storage buckets describe "gs://$sourceBucket" --project $ProjectId *> $null
+$sourceBucketExists = $LASTEXITCODE -eq 0
 $firestore = & gcloud firestore databases describe --database='(default)' --project $ProjectId --format='value(name)' 2>$null
-$ready = $missing.Count -eq 0 -and $repository -and $bucketExists -and $firestore
+$ready = $missing.Count -eq 0 -and $repository -and $bucketExists -and $sourceBucketExists -and $firestore
 
 [pscustomobject][ordered]@{
     status = if ($ready) { 'READY_FOR_DEPLOY_CONFIGURATION' } else { 'SETUP_INCOMPLETE' }
@@ -34,6 +37,7 @@ $ready = $missing.Count -eq 0 -and $repository -and $bucketExists -and $firestor
     missing_apis = $missing
     artifact_repository = [bool]$repository
     artifact_bucket = $bucketExists
+    build_source_bucket = $sourceBucketExists
     firestore = [bool]$firestore
     next_action = if ($ready) { 'GitHub Environment stagingのOIDCとSecretを設定してデプロイ設定へ進めます。' } else { 'prepare-staging-environment.ps1 を -Apply 付きで実行してください。' }
 }

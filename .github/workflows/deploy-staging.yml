@@ -31,8 +31,8 @@ jobs:
           set -euo pipefail
           ORCHESTRATOR_IMAGE="${{ vars.STAGING_REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/luvira-devflow/luvira-devflow-orchestrator-staging:${GITHUB_SHA}"
           WORKER_IMAGE="${{ vars.STAGING_REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/luvira-devflow/luvira-devflow-isolated-worker-staging:${GITHUB_SHA}"
-          gcloud builds submit orchestrator --tag "$ORCHESTRATOR_IMAGE" --project "${{ vars.STAGING_PROJECT_ID }}" --quiet
-          gcloud builds submit . --config worker/cloudbuild.bootstrap.yaml --substitutions "_IMAGE=$WORKER_IMAGE" --project "${{ vars.STAGING_PROJECT_ID }}" --quiet
+          gcloud builds submit orchestrator --tag "$ORCHESTRATOR_IMAGE" --project "${{ vars.STAGING_PROJECT_ID }}" --gcs-source-staging-dir "gs://${{ vars.STAGING_SOURCE_BUCKET }}/orchestrator" --quiet
+          gcloud builds submit . --config worker/cloudbuild.bootstrap.yaml --substitutions "_IMAGE=$WORKER_IMAGE" --project "${{ vars.STAGING_PROJECT_ID }}" --gcs-source-staging-dir "gs://${{ vars.STAGING_SOURCE_BUCKET }}/worker" --quiet
       - name: Deploy private staging orchestrator
         run: |
           set -euo pipefail
