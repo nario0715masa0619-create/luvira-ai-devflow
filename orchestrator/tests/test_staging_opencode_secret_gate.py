@@ -11,6 +11,9 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
     def test_staging_credential_is_opt_in_and_never_uses_production_secret_name(self):
         workflow = (ROOT / ".github" / "workflows" / "deploy-staging.yml").read_text(encoding="utf-8")
         self.assertIn('vars.STAGING_OPENCODE_ENABLED }}" = "true"', workflow)
+        self.assertIn('vars.STAGING_EXPECTED_REPOSITORY', workflow)
+        self.assertIn('dedicated -staging repository', workflow)
+        self.assertNotIn('EXPECTED_REPOSITORY=nario0715masa0619-create/luvira-ai-devflow,', workflow)
         self.assertIn('OPENCODE_GO_API_KEY=opencode-go-api-key-staging:latest', workflow)
         self.assertIn('--remove-secrets OPENCODE_GO_API_KEY', workflow)
         self.assertIn("if: vars.STAGING_OPENCODE_ENABLED == 'true'", workflow)

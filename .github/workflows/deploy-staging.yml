@@ -47,12 +47,17 @@ jobs:
       - name: Deploy private staging orchestrator
         run: |
           set -euo pipefail
+          STAGING_REPOSITORY="${{ vars.STAGING_EXPECTED_REPOSITORY }}"
+          case "$STAGING_REPOSITORY" in
+            */*-staging) ;;
+            *) echo "STAGING_EXPECTED_REPOSITORY must name a dedicated -staging repository" >&2; exit 1 ;;
+          esac
           IMAGE="${{ vars.STAGING_REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/luvira-devflow/luvira-devflow-orchestrator-staging:${GITHUB_SHA}"
           gcloud run deploy luvira-devflow-orchestrator-staging \
             --project "${{ vars.STAGING_PROJECT_ID }}" --region "${{ vars.STAGING_REGION }}" \
             --image "$IMAGE" --timeout 3600 --no-allow-unauthenticated --quiet \
             --service-account "${{ vars.STAGING_ORCHESTRATOR_SERVICE_ACCOUNT }}" \
-            --update-env-vars EXPECTED_REPOSITORY=nario0715masa0619-create/luvira-ai-devflow,V3_TASK_COLLECTION=devflow_staging_execution_tasks,V3_VERIFIED_ARTIFACT_COLLECTION=devflow_staging_verified_artifacts,V3_IMPLEMENTATION_ARTIFACT_COLLECTION=devflow_staging_verified_implementation_artifacts,V3_RUNTIME_HEALTH_COLLECTION=devflow_staging_runtime_health,BROKER_SERVICE_ACCOUNT=${{ vars.STAGING_ORCHESTRATOR_SERVICE_ACCOUNT }},ISOLATED_WORKER_JOB=luvira-devflow-isolated-worker-bootstrap-staging,ISOLATED_WORKER_REGION=${{ vars.STAGING_REGION }},ISOLATED_WORKER_ARTIFACT_BUCKET=${{ vars.STAGING_ARTIFACT_BUCKET }},ISOLATED_WORKER_ARTIFACT_VIEW=bootstrap-results,STAGING_OPENCODE_CANARY_ENABLED=${{ vars.STAGING_OPENCODE_CANARY_ENABLED }}
+            --update-env-vars EXPECTED_REPOSITORY=$STAGING_REPOSITORY,V3_TASK_COLLECTION=devflow_staging_execution_tasks,V3_VERIFIED_ARTIFACT_COLLECTION=devflow_staging_verified_artifacts,V3_IMPLEMENTATION_ARTIFACT_COLLECTION=devflow_staging_verified_implementation_artifacts,V3_RUNTIME_HEALTH_COLLECTION=devflow_staging_runtime_health,BROKER_SERVICE_ACCOUNT=${{ vars.STAGING_ORCHESTRATOR_SERVICE_ACCOUNT }},ISOLATED_WORKER_JOB=luvira-devflow-isolated-worker-bootstrap-staging,ISOLATED_WORKER_REGION=${{ vars.STAGING_REGION }},ISOLATED_WORKER_ARTIFACT_BUCKET=${{ vars.STAGING_ARTIFACT_BUCKET }},ISOLATED_WORKER_ARTIFACT_VIEW=bootstrap-results,STAGING_OPENCODE_CANARY_ENABLED=${{ vars.STAGING_OPENCODE_CANARY_ENABLED }}
       - name: Set staging-only OpenCode credential binding
         run: |
           set -euo pipefail
