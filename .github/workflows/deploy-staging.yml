@@ -103,3 +103,16 @@ jobs:
           test "$(jq --raw-output '.status' <<<"$response")" = "READY"
           test "$(jq --raw-output '.backend' <<<"$response")" = "firestore"
           test "$(jq --raw-output '.collection' <<<"$response")" = "devflow_staging_execution_tasks"
+      - name: Verify staging-only OpenCode connection
+        if: vars.STAGING_OPENCODE_ENABLED == 'true'
+        env:
+          SERVICE_URL: ${{ steps.deployed-service.outputs.url }}
+          ID_TOKEN: ${{ steps.control-plane-token.outputs.id_token }}
+        run: |
+          set -euo pipefail
+          # The readiness endpoint deliberately returns only provider state and
+          # model count.  It never returns the staging key or provider payload.
+          response="$(curl --fail --silent --show-error --header "Authorization: Bearer $ID_TOKEN" "$SERVICE_URL/readiness/opencode-go")"
+          test "$(jq --raw-output '.status' <<<"$response")" = "READY"
+          test "$(jq --raw-output '.provider' <<<"$response")" = "opencode-go"
+          test "$(jq --raw-output '.model_count' <<<"$response")" -gt 0

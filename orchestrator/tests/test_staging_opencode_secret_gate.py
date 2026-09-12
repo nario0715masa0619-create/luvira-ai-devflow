@@ -13,6 +13,9 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
         self.assertIn('vars.STAGING_OPENCODE_ENABLED }}" = "true"', workflow)
         self.assertIn('OPENCODE_GO_API_KEY=opencode-go-api-key-staging:latest', workflow)
         self.assertIn('--remove-secrets OPENCODE_GO_API_KEY', workflow)
+        self.assertIn("if: vars.STAGING_OPENCODE_ENABLED == 'true'", workflow)
+        self.assertIn('"$SERVICE_URL/readiness/opencode-go"', workflow)
+        self.assertIn("'.model_count'", workflow)
         self.assertNotIn('opencode-go-api-key-devflow', workflow)
 
     def test_staging_setup_creates_only_the_staging_secret_and_accessor_binding(self):
@@ -22,4 +25,3 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
         self.assertIn("secretmanager.googleapis.com", preparation)
         self.assertIn("'opencode-go-api-key-staging'", deployer)
         self.assertIn("roles/secretmanager.secretAccessor", deployer)
-
