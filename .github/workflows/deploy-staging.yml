@@ -73,6 +73,7 @@ jobs:
             gcloud run services update luvira-devflow-orchestrator-staging \
               --project "${{ vars.STAGING_PROJECT_ID }}" --region "${{ vars.STAGING_REGION }}" \
               --remove-secrets OPENCODE_GO_API_KEY --quiet
+          fi
       - name: Deploy staging-only GitHub webhook ingress
         if: vars.STAGING_GITHUB_INTEGRATION_ENABLED == 'true'
         run: |
@@ -82,7 +83,7 @@ jobs:
           case "$STAGING_REPOSITORY" in */*-staging) ;; *) echo "STAGING_EXPECTED_REPOSITORY must name a dedicated -staging repository" >&2; exit 1 ;; esac
           case "$WEBHOOK_SECRET" in *-staging) ;; *) echo "STAGING_GITHUB_WEBHOOK_SECRET must name a staging-only secret" >&2; exit 1 ;; esac
           IMAGE="${{ vars.STAGING_REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/luvira-devflow/luvira-devflow-orchestrator-staging:${GITHUB_SHA}"
-          ORCHESTRATOR_URL="$(gcloud run services describe luvira-devflow-orchestrator-staging --project \"${{ vars.STAGING_PROJECT_ID }}\" --region \"${{ vars.STAGING_REGION }}\" --format='value(status.url)')"
+          ORCHESTRATOR_URL="$(gcloud run services describe luvira-devflow-orchestrator-staging --project "${{ vars.STAGING_PROJECT_ID }}" --region "${{ vars.STAGING_REGION }}" --format='value(status.url)')"
           test -n "$ORCHESTRATOR_URL"
           gcloud run deploy luvira-devflow-github-ingress-staging \
             --project "${{ vars.STAGING_PROJECT_ID }}" --region "${{ vars.STAGING_REGION }}" \
@@ -93,7 +94,6 @@ jobs:
           gcloud run services add-iam-policy-binding luvira-devflow-orchestrator-staging \
             --project "${{ vars.STAGING_PROJECT_ID }}" --region "${{ vars.STAGING_REGION }}" \
             --member "serviceAccount:${{ vars.STAGING_WEBHOOK_SERVICE_ACCOUNT }}" --role roles/run.invoker --quiet
-          fi
       - name: Deploy isolated staging Worker
         run: |
           set -euo pipefail
