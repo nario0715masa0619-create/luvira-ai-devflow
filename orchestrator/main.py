@@ -34,10 +34,13 @@ PUBLIC_WEBHOOK_INGRESS_ONLY = os.environ.get("PUBLIC_WEBHOOK_INGRESS_ONLY", "").
 ORCHESTRATOR_URL = os.environ.get("ORCHESTRATOR_URL", "").rstrip("/")
 V3_TASK_COLLECTION = os.environ.get("V3_TASK_COLLECTION", "").strip()
 BROKER_SERVICE_ACCOUNT = os.environ.get("BROKER_SERVICE_ACCOUNT", "").strip()
-WORKER_JOB = os.environ.get("ISOLATED_WORKER_JOB", "luvira-devflow-isolated-worker-bootstrap")
-WORKER_REGION = os.environ.get("ISOLATED_WORKER_REGION", "us-central1")
-WORKER_ARTIFACT_BUCKET = os.environ.get("ISOLATED_WORKER_ARTIFACT_BUCKET", "luvira-devflow-bootstrap-results")
-WORKER_ARTIFACT_VIEW = os.environ.get("ISOLATED_WORKER_ARTIFACT_VIEW", "bootstrap-results")
+WORKER_JOB = os.environ.get("ISOLATED_WORKER_JOB", "").strip()
+WORKER_REGION = os.environ.get("ISOLATED_WORKER_REGION", "").strip()
+WORKER_ARTIFACT_BUCKET = os.environ.get("ISOLATED_WORKER_ARTIFACT_BUCKET", "").strip()
+WORKER_ARTIFACT_VIEW = os.environ.get("ISOLATED_WORKER_ARTIFACT_VIEW", "").strip()
+VERIFIED_ARTIFACT_COLLECTION = os.environ.get("V3_VERIFIED_ARTIFACT_COLLECTION", "").strip()
+IMPLEMENTATION_ARTIFACT_COLLECTION = os.environ.get("V3_IMPLEMENTATION_ARTIFACT_COLLECTION", "").strip()
+RUNTIME_HEALTH_COLLECTION = os.environ.get("V3_RUNTIME_HEALTH_COLLECTION", "").strip()
 OPENCODE_IMPLEMENTATION_MODEL = os.environ.get("OPENCODE_IMPLEMENTATION_MODEL", "kimi-k2.6").strip()
 # The protected human-approval workflow is the sole external trigger for the
 # Broker.  It already has Cloud Run Invoker and an immutable approval binding.
@@ -50,7 +53,15 @@ BOOTSTRAP_CALLER_EMAIL = os.environ.get("BOOTSTRAP_CALLER_EMAIL", "devflow-human
 def create_v3_queue_from_environment():
     if not os.environ.get("K_SERVICE") or PUBLIC_WEBHOOK_INGRESS_ONLY:
         return None
-    if not all((V3_TASK_COLLECTION, BROKER_SERVICE_ACCOUNT)):
+    # All durable stores and external resources are explicit deployment
+    # inputs.  Defaults here would allow a staging revision to write into a
+    # production-named collection or bucket when one setting was omitted.
+    if not all((
+        V3_TASK_COLLECTION, BROKER_SERVICE_ACCOUNT, WORKER_JOB, WORKER_REGION,
+        WORKER_ARTIFACT_BUCKET, WORKER_ARTIFACT_VIEW,
+        VERIFIED_ARTIFACT_COLLECTION, IMPLEMENTATION_ARTIFACT_COLLECTION,
+        RUNTIME_HEALTH_COLLECTION,
+    )):
         return None
     return create_v3_queue_service(
         project=os.environ.get("GOOGLE_CLOUD_PROJECT", "luvira-ai-control-plane"),
@@ -69,6 +80,9 @@ def create_v3_queue_from_environment():
         runtime_incident_reporter=lambda checks: create_runtime_incident(checks),
         artifact_bucket=WORKER_ARTIFACT_BUCKET,
         artifact_view=WORKER_ARTIFACT_VIEW,
+        artifact_collection=VERIFIED_ARTIFACT_COLLECTION,
+        implementation_artifact_collection=IMPLEMENTATION_ARTIFACT_COLLECTION,
+        runtime_health_collection=RUNTIME_HEALTH_COLLECTION,
     )
 
 

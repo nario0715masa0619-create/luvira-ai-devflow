@@ -48,7 +48,7 @@ jobs:
             --image us-central1-docker.pkg.dev/luvira-ai-control-plane/cloud-run-source-deploy/luvira-devflow-orchestrator:${GITHUB_SHA} \
             --region us-central1 --timeout 3600 --no-allow-unauthenticated --quiet \
             --service-account devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com \
-            --update-env-vars GITHUB_WORKER_APP_ID=4823016,GITHUB_WORKER_INSTALLATION_ID=158901090,V3_TASK_COLLECTION=devflow_execution_tasks,BROKER_SERVICE_ACCOUNT=devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com \
+            --update-env-vars GITHUB_WORKER_APP_ID=4823016,GITHUB_WORKER_INSTALLATION_ID=158901090,V3_TASK_COLLECTION=devflow_execution_tasks,V3_VERIFIED_ARTIFACT_COLLECTION=devflow_verified_artifacts,V3_IMPLEMENTATION_ARTIFACT_COLLECTION=devflow_verified_implementation_artifacts,V3_RUNTIME_HEALTH_COLLECTION=devflow_runtime_health,BROKER_SERVICE_ACCOUNT=devflow-orchestrator@luvira-ai-control-plane.iam.gserviceaccount.com,ISOLATED_WORKER_JOB=luvira-devflow-isolated-worker-bootstrap,ISOLATED_WORKER_REGION=us-central1,ISOLATED_WORKER_ARTIFACT_BUCKET=luvira-devflow-bootstrap-results,ISOLATED_WORKER_ARTIFACT_VIEW=bootstrap-results \
             --set-secrets OPENCODE_GO_API_KEY=opencode-go-api-key:latest,GITHUB_WORKER_PRIVATE_KEY=github-app-luvirai-worker-private-key:latest,GITHUB_WEBHOOK_SECRET=github-webhook-signing-secret:latest
       - name: Resolve deployed service URL
         id: deployed-service

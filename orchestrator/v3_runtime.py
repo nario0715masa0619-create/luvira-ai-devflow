@@ -54,10 +54,11 @@ def create_v3_queue_service(
     source_token_for_repository: Callable[[str], str],
     worker_identity_available: Callable[[], bool],
     runtime_incident_reporter: Callable[[dict[str, str]], None],
-    artifact_bucket: str = "luvira-devflow-bootstrap-results",
-    artifact_view: str = "bootstrap-results",
-    artifact_collection: str = "devflow_verified_artifacts",
-    implementation_artifact_collection: str = "devflow_verified_implementation_artifacts",
+    artifact_bucket: str,
+    artifact_view: str,
+    artifact_collection: str,
+    implementation_artifact_collection: str,
+    runtime_health_collection: str,
 ) -> V3QueueRuntime:
     """Compose only read checks plus the durable queue; never a launcher."""
     firestore_client = firestore.Client()
@@ -149,7 +150,7 @@ def create_v3_queue_service(
         lambda task: GitHubVerifiedPublisher(task.spec.repository, source_token_for_repository(task.spec.repository)),
     )
     watchdog = RuntimeHealthWatchdog(
-        FirestoreRuntimeHealthStore(firestore_client),
+        FirestoreRuntimeHealthStore(firestore_client, runtime_health_collection),
         _runtime_checks(tasks, provider_available, worker_identity_available), runtime_incident_reporter,
     )
     return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication, completion, watchdog)
