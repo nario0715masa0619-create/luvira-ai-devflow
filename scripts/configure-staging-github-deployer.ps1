@@ -81,6 +81,11 @@ foreach ($role in @('roles/datastore.user', 'roles/logging.viewer', 'roles/run.d
     Invoke-PlanOrApply @('projects', 'add-iam-policy-binding', $ProjectId, "--member=serviceAccount:$orchestratorAccount", "--role=$role")
 }
 Invoke-PlanOrApply @('secrets', 'add-iam-policy-binding', 'opencode-go-api-key-staging', '--project', $ProjectId, "--member=serviceAccount:$orchestratorAccount", '--role=roles/secretmanager.secretAccessor')
+if (Test-GcloudResource @('secrets', 'describe', 'github-worker-private-key-staging', '--project', $ProjectId)) {
+    Invoke-PlanOrApply @('secrets', 'add-iam-policy-binding', 'github-worker-private-key-staging', '--project', $ProjectId, "--member=serviceAccount:$orchestratorAccount", '--role=roles/secretmanager.secretAccessor')
+} else {
+    Write-Host '[未設定] GitHub App秘密鍵はApp作成後に登録し、その後もう一度このスクリプトを実行してください。'
+}
 Invoke-PlanOrApply @('secrets', 'add-iam-policy-binding', 'github-webhook-signing-secret-staging', '--project', $ProjectId, "--member=serviceAccount:$webhookAccount", '--role=roles/secretmanager.secretAccessor')
 Invoke-PlanOrApply @('storage', 'buckets', 'add-iam-policy-binding', "gs://$sourceBucket", "--member=serviceAccount:$deployerAccount", '--role=roles/storage.objectAdmin')
 
