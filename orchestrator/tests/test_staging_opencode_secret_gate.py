@@ -45,3 +45,11 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
         self.assertIn("secretmanager.googleapis.com", preparation)
         self.assertIn("'opencode-go-api-key-staging'", deployer)
         self.assertIn("roles/secretmanager.secretAccessor", deployer)
+
+    def test_webhook_secret_registration_rejects_newlines_and_uses_file_input(self):
+        script = (ROOT / "scripts" / "set-staging-github-webhook-secret.ps1").read_text(encoding="utf-8")
+        self.assertIn("github-webhook-signing-secret-staging", script)
+        self.assertIn("--data-file=$SecretPath", script)
+        self.assertIn("$secretBytes -contains 10 -or $secretBytes -contains 13", script)
+        self.assertIn("luvira-ai-control-plane", script)
+        self.assertNotIn("--data-file=-", script)
