@@ -70,7 +70,10 @@ function Get-TaskView {
         $statusProperty = $fields.PSObject.Properties['status']
         if ($null -eq $statusProperty) { continue }
         $status = $statusProperty.Value.stringValue
-        if ($status -in @('MERGED', 'EXECUTION_FAILED_FINAL', 'CANCELLED', 'EXPIRED', 'REJECTED')) { continue }
+        # A validation task has no generated implementation to publish.  Its
+        # successful Worker proof is therefore a terminal outcome, not stale
+        # unfinished work requiring operator attention.
+        if ($status -in @('MERGED', 'VALIDATION_SUCCEEDED', 'EXECUTION_FAILED_FINAL', 'CANCELLED', 'EXPIRED', 'REJECTED')) { continue }
 
         $updatedAt = [datetime]::Parse($document.updateTime).ToUniversalTime()
         $record = [pscustomobject][ordered]@{
