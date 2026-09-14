@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 
 from execution_platform import (
     ExecutionPlatform, PreflightRejected, TaskSpec, TransitionRejected,
@@ -64,6 +65,17 @@ class ExecutionPlatformTest(unittest.TestCase):
         self.assertEqual(classify_external_failure(403), "HTTP_403_FINAL")
         self.assertEqual(classify_external_failure(409), "HTTP_409_RETRYABLE")
         self.assertEqual(classify_external_failure(None, timeout=True), "EXTERNAL_TIMEOUT_RETRYABLE")
+
+    def test_expired_approval_is_terminal_without_creating_an_execution(self):
+        platform = ExecutionPlatform()
+        task = platform.create(spec(), "task-expired")
+        platform.validate(task.task_id)
+        platform.request_approval(task.task_id)
+
+        self.assertTrue(ExecutionPlatform.expire_approval_existing(task, datetime(2027, 1, 1, tzinfo=timezone.utc)))
+        self.assertEqual(task.status, V3Status.EXPIRED)
+        self.assertIsNone(task.execution)
+        self.assertIn("TASK_EXPIRED", task.audit)
 
     def test_opencode_zen_budget_failure_is_final_not_a_scheduler_retry(self):
         platform, task = self.authorized()

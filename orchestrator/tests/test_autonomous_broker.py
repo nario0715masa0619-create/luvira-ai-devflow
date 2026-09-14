@@ -42,3 +42,13 @@ class AutonomousBrokerTest(unittest.TestCase):
         outcome = AutonomousBroker(tasks, queue, runtime_watchdog=watchdog).sweep()
 
         self.assertEqual(outcome, [("runtime", "RUNTIME_HEALTH_UNAVAILABLE", "monitor_unavailable"), ("t", "QUEUED", "internal")])
+
+    def test_expiry_read_failure_never_blocks_an_approved_task(self):
+        task = Task(V3Status.AUTHORIZED)
+        tasks = type("Tasks", (), {"eligible": lambda _: [task]})()
+        queue = type("Queue", (), {"request": lambda *_: (type("Record", (), {"execution_id": "internal"})(), None)})()
+        expiry = type("Expiry", (), {"sweep": lambda _: (_ for _ in ()).throw(TimeoutError())})()
+
+        outcome = AutonomousBroker(tasks, queue, approval_expiry=expiry).sweep()
+
+        self.assertEqual(outcome, [("approval_expiry", "APPROVAL_EXPIRY_UNAVAILABLE", "retry_pending"), ("t", "QUEUED", "internal")])

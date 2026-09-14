@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime, timezone
 from typing import Protocol
 
 from durable_queue_service import DurableQueueRejected, DurableQueueService
@@ -34,9 +35,15 @@ def _binding(task_id: str, spec: TaskSpec) -> str:
 class V3ControlPlane:
     """Single-writer lifecycle facade; GitHub and workers never write state."""
 
-    def __init__(self, tasks: V3TaskStore, queue: DurableQueueService):
+    def __init__(self, tasks: V3TaskStore, queue: DurableQueueService, *, clock=None):
         self.tasks = tasks
         self.queue = queue
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def _reject_expired_approval(self, task: V3Task) -> None:
+        if ExecutionPlatform.expire_approval_existing(task, self.clock()):
+            self.tasks.save(task)
+            raise V3ControlPlaneError("approval_expired")
 
     def register(self, task_id: str, raw_spec: dict) -> V3Task:
         spec = TaskSpec.from_dict(raw_spec)
@@ -78,6 +85,7 @@ class V3ControlPlane:
             raise V3ControlPlaneError("approval_binding_mismatch")
 
         if task.status is V3Status.AWAITING_HUMAN_APPROVAL:
+            self._reject_expired_approval(task)
             task.status = V3Status.AUTHORIZED
             task.audit.append("TASK_AUTHORIZED")
             self.tasks.save(task)
@@ -104,6 +112,7 @@ class V3ControlPlane:
         if binding != _binding(task.task_id, task.spec) or binding != task.approval_binding:
             raise V3ControlPlaneError("approval_binding_mismatch")
         if task.status is V3Status.AWAITING_HUMAN_APPROVAL:
+            self._reject_expired_approval(task)
             task.status = V3Status.AUTHORIZED
             task.audit.append("TASK_AUTHORIZED")
             self.tasks.save(task)

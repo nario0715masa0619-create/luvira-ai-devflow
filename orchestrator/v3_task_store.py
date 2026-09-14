@@ -115,6 +115,10 @@ class FirestoreV3TaskStore:
             V3Status.AUTHORIZED.value, V3Status.EXECUTION_FAILED_RETRYABLE.value,
         ])
 
+    def awaiting_human_approval(self):
+        """Read only approval records eligible for deadline enforcement."""
+        return self._with_status(V3Status.AWAITING_HUMAN_APPROVAL.value)
+
     def running(self):
         """Read claimed executions for result reconciliation only."""
         return self._with_status([

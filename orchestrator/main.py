@@ -19,6 +19,7 @@ from v3_runtime import create_v3_queue_service
 from v3_control_plane import V3ControlPlane, V3ControlPlaneError
 from execution_platform import V3Status, task_spec_hash
 from autonomous_broker import AutonomousBroker
+from approval_expiry_service import ApprovalExpiryService
 from implementation_artifact_verifier import verify_implementation_artifact, ImplementationArtifactError
 from opencode_implementation_client import OpenCodeImplementationClient, OpenCodeImplementationError
 
@@ -96,7 +97,7 @@ V3_CONTROL_PLANE = V3ControlPlane(V3_TASK_STORE, V3_QUEUE_SERVICE) if V3_TASK_ST
 V3_AUTONOMOUS_BROKER = AutonomousBroker(
     V3_TASK_STORE, V3_QUEUE_SERVICE, V3_QUEUE_RUNTIME.dispatcher, V3_QUEUE_RUNTIME.reconciler,
     V3_QUEUE_RUNTIME.implementation, V3_QUEUE_RUNTIME.publication, V3_QUEUE_RUNTIME.completion,
-    V3_QUEUE_RUNTIME.runtime_watchdog,
+    V3_QUEUE_RUNTIME.runtime_watchdog, ApprovalExpiryService(V3_TASK_STORE),
 ) if V3_QUEUE_RUNTIME else None
 
 
