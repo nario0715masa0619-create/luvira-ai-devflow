@@ -52,18 +52,6 @@ jobs:
             */*-staging) ;;
             *) echo "STAGING_EXPECTED_REPOSITORY must name a dedicated -staging repository" >&2; exit 1 ;;
           esac
-          # Establish the Secret Manager permission before attempting to bind
-          # the secret to the private revision.  Cloud Run verifies this at
-          # revision creation time, so a separately run setup script cannot be
-          # a hidden prerequisite for a deploy.
-          if [ "${{ vars.STAGING_GITHUB_INTEGRATION_ENABLED }}" = "true" ]; then
-            WEBHOOK_SECRET="${{ vars.STAGING_GITHUB_WEBHOOK_SECRET }}"
-            case "$WEBHOOK_SECRET" in *-staging) ;; *) echo "STAGING_GITHUB_WEBHOOK_SECRET must name a staging-only secret" >&2; exit 1 ;; esac
-            gcloud secrets add-iam-policy-binding "$WEBHOOK_SECRET" \
-              --project "${{ vars.STAGING_PROJECT_ID }}" \
-              --member "serviceAccount:${{ vars.STAGING_ORCHESTRATOR_SERVICE_ACCOUNT }}" \
-              --role roles/secretmanager.secretAccessor --quiet
-          fi
           IMAGE="${{ vars.STAGING_REGION }}-docker.pkg.dev/${{ vars.STAGING_PROJECT_ID }}/luvira-devflow/luvira-devflow-orchestrator-staging:${GITHUB_SHA}"
           gcloud run deploy luvira-devflow-orchestrator-staging \
             --project "${{ vars.STAGING_PROJECT_ID }}" --region "${{ vars.STAGING_REGION }}" \
