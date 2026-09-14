@@ -27,8 +27,7 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
         self.assertIn("PUBLIC_WEBHOOK_INGRESS_ONLY=true", workflow)
         self.assertIn("EXPECTED_REPOSITORY=$STAGING_REPOSITORY", workflow)
         self.assertIn("--update-secrets GITHUB_WEBHOOK_SECRET=$WEBHOOK_SECRET:latest", workflow)
-        self.assertIn('gcloud secrets add-iam-policy-binding "$WEBHOOK_SECRET"', workflow)
-        self.assertIn('--member "serviceAccount:${{ vars.STAGING_ORCHESTRATOR_SERVICE_ACCOUNT }}"', workflow)
+        self.assertNotIn('gcloud secrets add-iam-policy-binding "$WEBHOOK_SECRET"', workflow)
         self.assertIn("github-webhook-signing-secret-staging", (ROOT / "scripts" / "prepare-staging-environment.ps1").read_text(encoding="utf-8"))
 
     def test_staging_open_code_binding_is_a_complete_shell_block_before_ingress(self):
