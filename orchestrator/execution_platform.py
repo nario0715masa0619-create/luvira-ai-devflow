@@ -9,6 +9,7 @@ system to it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 import hashlib
 import json
@@ -121,7 +122,18 @@ class TaskSpec:
             raise ExecutionPlatformError("task_scope_invalid")
         if any(not isinstance(path, str) or not path or path.startswith("/") or ".." in path.split("/") for path in instance.source_paths):
             raise ExecutionPlatformError("task_source_scope_invalid")
+        # Approval expiry is a security boundary, not display metadata.  Store
+        # one unambiguous UTC instant so every runner can make the same decision.
+        try:
+            expires_at = datetime.fromisoformat(instance.expiry.replace("Z", "+00:00"))
+        except (AttributeError, ValueError) as exc:
+            raise ExecutionPlatformError("task_expiry_invalid") from exc
+        if expires_at.tzinfo is None or expires_at.utcoffset() is None:
+            raise ExecutionPlatformError("task_expiry_invalid")
         return instance
+
+    def expires_at(self) -> datetime:
+        return datetime.fromisoformat(self.expiry.replace("Z", "+00:00")).astimezone(timezone.utc)
 
     def canonical_dict(self) -> dict[str, Any]:
         result = {
@@ -211,6 +223,19 @@ class ExecutionPlatform:
         task.status = V3Status.AUTHORIZED
         task.audit.append("TASK_AUTHORIZED")
         return task
+
+    @staticmethod
+    def expire_approval_existing(task: V3Task, now: datetime) -> bool:
+        """Terminalize only an unapproved task whose immutable deadline passed."""
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise TransitionRejected("expiry_clock_invalid")
+        if task.status is not V3Status.AWAITING_HUMAN_APPROVAL:
+            return False
+        if task.spec.expires_at() > now.astimezone(timezone.utc):
+            return False
+        task.status = V3Status.EXPIRED
+        task.audit.append("TASK_EXPIRED")
+        return True
 
     def queue(self, task_id: str, preflight: Iterable[bool]) -> ExecutionRecord:
         task = self._task(task_id, V3Status.AUTHORIZED, V3Status.EXECUTION_FAILED_RETRYABLE)

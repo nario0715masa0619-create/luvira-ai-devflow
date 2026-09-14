@@ -1,6 +1,7 @@
 import hashlib
 import json
 import unittest
+from datetime import datetime, timezone
 
 from execution_platform import ExecutionRecord, V3Status
 from v3_control_plane import V3ControlPlane, V3ControlPlaneError
@@ -71,6 +72,18 @@ class V3ControlPlaneTest(unittest.TestCase):
         binding = hashlib.sha256(json.dumps({"task_id": task.task_id, "spec_hash": task.spec.hash}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
         authorized = plane.authorize(task.task_id, binding, "reviewer")
         self.assertEqual(authorized.status, V3Status.AUTHORIZED)
+        self.assertEqual(queue.calls, 0)
+
+    def test_expired_approval_is_rejected_and_persisted_as_terminal(self):
+        store = MemoryStore(); queue = Queue(store)
+        expired = spec(); expired["expiry"] = "2026-01-01T00:00:00Z"
+        plane = V3ControlPlane(store, queue, clock=lambda: datetime(2026, 1, 2, tzinfo=timezone.utc))
+        task = plane.register("github-issue-1-aaaaaaaaaaaaaaaa", expired)
+        binding = hashlib.sha256(json.dumps({"task_id": task.task_id, "spec_hash": task.spec.hash}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+        with self.assertRaisesRegex(V3ControlPlaneError, "approval_expired"):
+            plane.authorize(task.task_id, binding, "reviewer")
+        self.assertEqual(store.get(task.task_id).status, V3Status.EXPIRED)
         self.assertEqual(queue.calls, 0)
 
     def test_changed_approval_context_cannot_reuse_task_id(self):

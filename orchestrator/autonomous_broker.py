@@ -3,12 +3,20 @@ from execution_platform import ExecutionPlatformError, V3Status
 
 
 class AutonomousBroker:
-    def __init__(self, tasks, queue, dispatcher=None, reconciler=None, implementation=None, publication=None, completion=None, runtime_watchdog=None):
-        self.tasks, self.queue, self.dispatcher, self.reconciler, self.implementation, self.publication, self.completion, self.runtime_watchdog = tasks, queue, dispatcher, reconciler, implementation, publication, completion, runtime_watchdog
+    def __init__(self, tasks, queue, dispatcher=None, reconciler=None, implementation=None, publication=None, completion=None, runtime_watchdog=None, approval_expiry=None):
+        self.tasks, self.queue, self.dispatcher, self.reconciler, self.implementation, self.publication, self.completion, self.runtime_watchdog, self.approval_expiry = tasks, queue, dispatcher, reconciler, implementation, publication, completion, runtime_watchdog, approval_expiry
 
     def sweep(self):
         """Attempt each eligible persisted task; retain approval on failure."""
         outcomes = []
+        if self.approval_expiry is not None:
+            try:
+                outcomes.extend(self.approval_expiry.sweep())
+            except Exception:
+                # Deadline enforcement is retried by the next sweep.  A
+                # temporary Firestore read failure must not prevent recovery
+                # of already-authorized work.
+                outcomes.append(("approval_expiry", "APPROVAL_EXPIRY_UNAVAILABLE", "retry_pending"))
         if self.runtime_watchdog is not None:
             try:
                 outcome, detail = self.runtime_watchdog.sweep()
