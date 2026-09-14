@@ -26,6 +26,7 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
         self.assertIn("vars.STAGING_GITHUB_WEBHOOK_SECRET", workflow)
         self.assertIn("PUBLIC_WEBHOOK_INGRESS_ONLY=true", workflow)
         self.assertIn("EXPECTED_REPOSITORY=$STAGING_REPOSITORY", workflow)
+        self.assertIn("--update-secrets GITHUB_WEBHOOK_SECRET=$WEBHOOK_SECRET:latest", workflow)
         self.assertIn("github-webhook-signing-secret-staging", (ROOT / "scripts" / "prepare-staging-environment.ps1").read_text(encoding="utf-8"))
 
     def test_staging_open_code_binding_is_a_complete_shell_block_before_ingress(self):
@@ -45,6 +46,8 @@ class StagingOpenCodeSecretGateTests(unittest.TestCase):
         self.assertIn("secretmanager.googleapis.com", preparation)
         self.assertIn("'opencode-go-api-key-staging'", deployer)
         self.assertIn("roles/secretmanager.secretAccessor", deployer)
+        self.assertIn("serviceAccount:$orchestratorAccount", deployer)
+        self.assertIn("'github-webhook-signing-secret-staging'", deployer)
 
     def test_webhook_secret_registration_rejects_newlines_and_uses_file_input(self):
         script = (ROOT / "scripts" / "set-staging-github-webhook-secret.ps1").read_text(encoding="utf-8")
