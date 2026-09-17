@@ -24,10 +24,16 @@ def main() -> None:
         f"projects/{contract['project_number']}/locations/global/"
         f"workloadIdentityPools/{contract['pool_id']}/providers/{contract['provider_id']}"
     )
+    discovery_provider = (
+        f"projects/{contract['project_number']}/locations/global/"
+        f"workloadIdentityPools/{contract['pool_id']}/providers/{contract['discovery_provider_id']}"
+    )
     require(workflow, f"name: {contract['workflow']}", "workflow name")
     require(workflow, f"environment: {contract['environment']}", "protected environment")
     require(workflow, f"workload_identity_provider: {provider}", "dedicated OIDC provider")
     require(workflow, f"service_account: {contract['service_account']}", "dedicated service account")
+    require(workflow, f"workload_identity_provider: {discovery_provider}", "discovery OIDC provider")
+    require(workflow, f"service_account: {contract['discovery_service_account']}", "discovery service account")
     require(workflow, "gcloud run services describe", "canonical Cloud Run endpoint discovery")
     require(workflow, "${{ steps.orchestrator.outputs.url }}", "discovered ID-token audience")
     require(workflow, "issue_number:", "server-owned approval Issue input")
@@ -38,6 +44,9 @@ def main() -> None:
         raise SystemExit("human-approval workflow must not hard-code a Cloud Run endpoint")
     if "github-deployer" in workflow or "devflow-deployer@" in workflow:
         raise SystemExit("human-approval workflow must not use the deployment identity")
+    validate_job = workflow.split("  authorize:", 1)[0]
+    if contract["service_account"] in validate_job:
+        raise SystemExit("pre-approval validation must not use the protected approval identity")
 
 
 if __name__ == "__main__":
