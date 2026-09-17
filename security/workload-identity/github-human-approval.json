@@ -4,7 +4,7 @@
   "provider_id": "github-human-approval",
   "service_account": "devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com",
   "discovery_provider_id": "github-human-approval-discovery",
-  "discovery_service_account": "devflow-human-approval-discovery@luvira-ai-control-plane.iam.gserviceaccount.com",
+  "discovery_service_account": "devflow-approval-check@luvira-ai-control-plane.iam.gserviceaccount.com",
   "repository": "nario0715masa0619-create/luvira-ai-devflow",
   "workflow": "Authorize approved DevFlow task",
   "environment": "human-approval",

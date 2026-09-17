@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import sys
 
 
@@ -20,6 +21,9 @@ def require(text: str, expected: str, label: str) -> None:
 def main() -> None:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     workflow = WORKFLOW.read_text(encoding="utf-8")
+    discovery_account_id = contract["discovery_service_account"].split("@", 1)[0]
+    if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", discovery_account_id):
+        raise SystemExit("discovery service account ID must satisfy Google Cloud naming limits")
     provider = (
         f"projects/{contract['project_number']}/locations/global/"
         f"workloadIdentityPools/{contract['pool_id']}/providers/{contract['provider_id']}"
