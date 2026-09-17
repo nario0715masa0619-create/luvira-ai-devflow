@@ -24,6 +24,11 @@ def main() -> None:
     discovery_account_id = contract["discovery_service_account"].split("@", 1)[0]
     if not re.fullmatch(r"[a-z][a-z0-9-]{4,28}[a-z0-9]", discovery_account_id):
         raise SystemExit("discovery service account ID must satisfy Google Cloud naming limits")
+    expected_roles = ["roles/run.invoker", "roles/run.viewer"]
+    if contract.get("protected_roles") != expected_roles:
+        raise SystemExit("protected approval identity roles must be invoker and service viewer")
+    if contract.get("discovery_roles") != expected_roles:
+        raise SystemExit("discovery identity roles must be invoker and service viewer")
     provider = (
         f"projects/{contract['project_number']}/locations/global/"
         f"workloadIdentityPools/{contract['pool_id']}/providers/{contract['provider_id']}"
