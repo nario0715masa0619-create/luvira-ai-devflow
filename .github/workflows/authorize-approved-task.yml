@@ -23,7 +23,7 @@ jobs:
         id: discovery_auth
         with:
           workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval-discovery
-          service_account: devflow-human-approval-discovery@luvira-ai-control-plane.iam.gserviceaccount.com
+          service_account: devflow-approval-check@luvira-ai-control-plane.iam.gserviceaccount.com
           audience: https://github.com/nario0715masa0619-create
       - name: Discover the canonical orchestrator endpoint
         id: orchestrator
@@ -39,7 +39,7 @@ jobs:
         id: request_auth
         with:
           workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval-discovery
-          service_account: devflow-human-approval-discovery@luvira-ai-control-plane.iam.gserviceaccount.com
+          service_account: devflow-approval-check@luvira-ai-control-plane.iam.gserviceaccount.com
           audience: https://github.com/nario0715masa0619-create
           token_format: id_token
           id_token_audience: ${{ steps.orchestrator.outputs.url }}

@@ -8,7 +8,7 @@ GitHubのリポジトリ設定で `human-approval` Environment を作成し、re
 
 このworkflowは専用GitHub OIDC providerと専用サービスアカウントから、private Cloud Run Control Planeだけを呼び出す。専用サービスアカウントに与える権限は `roles/run.invoker` のみであり、Cloud Runデプロイ、Secret Manager、GitHub App、AI providerへの権限は与えない。長期鍵、OpenCode Go APIキー、GitHub App秘密鍵をrunnerや入力欄に置かない。
 
-OIDCは二つの専用IDに分離する。検証ジョブは、対象リポジトリとworkflow名だけを固定した `github-human-approval-discovery` / `devflow-human-approval-discovery` を使い、Control Planeの受理済み確認だけを行う。保護承認後の記録ジョブだけが、リポジトリ・workflow名・`human-approval` Environmentをすべて固定した `github-human-approval` / `devflow-human-approval` を使う。両方のサービスアカウントの権限は `roles/run.invoker` のみにする。
+OIDCは二つの専用IDに分離する。検証ジョブは、対象リポジトリとworkflow名だけを固定した `github-human-approval-discovery` / `devflow-approval-check` を使い、Control Planeの受理済み確認だけを行う。保護承認後の記録ジョブだけが、リポジトリ・workflow名・`human-approval` Environmentをすべて固定した `github-human-approval` / `devflow-human-approval` を使う。両方のサービスアカウントの権限は `roles/run.invoker` のみにする。
 
 対応する契約は `security/workload-identity/github-human-approval.json` に保存し、PRでは `Verify human approval identity` がworkflowとの不整合をfail-closedで止める。検証専用IDへデプロイ、Secret Manager、GitHub App、AI providerの権限を追加してはならない。
 
