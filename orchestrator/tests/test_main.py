@@ -9,6 +9,7 @@ from unittest.mock import patch
 os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
 import main
 from main import app
+from project_onboarding import InMemoryProjectRegistry, ProjectOnboardingService
 
 
 def event(payload):
@@ -397,3 +398,42 @@ read
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json, {"status": "PENDING_CONTEXT_LOCK"})
         forward.assert_called_once_with(raw, signature, "issues")
+
+    def test_project_onboarding_requires_approval_before_provisioning(self):
+        previous = main.PROJECT_ONBOARDING
+        main.PROJECT_ONBOARDING = ProjectOnboardingService(InMemoryProjectRegistry())
+        try:
+            created = self.client.post("/control-plane/v3/projects", json={
+                "owner": "nario0715masa0619-create", "slug": "new-product", "description": "新規プロダクト",
+            })
+            self.assertEqual(created.status_code, 201)
+            project_id = created.json["project_id"]
+            self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/claim-provisioning").status_code, 409)
+
+            pending = self.client.get(f"/control-plane/v3/projects/{project_id}/pending")
+            self.assertEqual(pending.status_code, 200)
+            authorized = self.client.post(f"/control-plane/v3/projects/{project_id}/authorize", json={
+                "actor": "nario0715masa0619-create", "approval_binding": pending.json["approval_binding"],
+            })
+            self.assertEqual(authorized.status_code, 200)
+            claimed = self.client.post(f"/control-plane/v3/projects/{project_id}/claim-provisioning")
+            self.assertEqual(claimed.status_code, 200)
+            self.assertEqual(claimed.json["status"], "PROVISIONING")
+        finally:
+            main.PROJECT_ONBOARDING = previous
+
+    def test_project_onboarding_rejects_wrong_approval_binding(self):
+        previous = main.PROJECT_ONBOARDING
+        main.PROJECT_ONBOARDING = ProjectOnboardingService(InMemoryProjectRegistry())
+        try:
+            created = self.client.post("/control-plane/v3/projects", json={
+                "owner": "nario0715masa0619-create", "slug": "new-product", "description": "新規プロダクト",
+            })
+            response = self.client.post(
+                f"/control-plane/v3/projects/{created.json['project_id']}/authorize",
+                json={"actor": "nario0715masa0619-create", "approval_binding": "0" * 64},
+            )
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json["reason"], "project_approval_binding_mismatch")
+        finally:
+            main.PROJECT_ONBOARDING = previous

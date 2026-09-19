@@ -164,6 +164,9 @@ class ProjectOnboardingService:
             return record
         raise ProjectOnboardingError("project_already_requested")
 
+    def get(self, project_id: str) -> ProjectRecord:
+        return self._registry.get(project_id)
+
     def approve(self, project_id: str) -> ProjectRecord:
         record = self._registry.get(project_id)
         if record.status is not ProjectStatus.REQUESTED:
