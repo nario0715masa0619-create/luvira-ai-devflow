@@ -219,6 +219,20 @@ def control_plane_readiness():
     return jsonify(status="READY", backend="firestore", collection=V3_TASK_COLLECTION, lifecycle="v3-only")
 
 
+@app.get("/readiness/project-onboarding")
+def project_onboarding_readiness():
+    """Read-only proof that new product requests have durable isolated storage."""
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    try:
+        service.readiness_check()
+    except Exception:
+        logging.warning("PROJECT_ONBOARDING_BLOCKED durable registry is unavailable")
+        return jsonify(status="BLOCKED", reason="project_registry_unavailable"), 503
+    return jsonify(status="READY", backend="firestore", collection=PROJECT_REGISTRY_COLLECTION), 200
+
+
 @app.post("/control-plane/v3/tasks/<task_id>/authorize")
 def authorize_v3_task(task_id):
     """Commit a human decision only; broker admission is asynchronous."""

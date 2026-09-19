@@ -437,3 +437,13 @@ read
             self.assertEqual(response.json["reason"], "project_approval_binding_mismatch")
         finally:
             main.PROJECT_ONBOARDING = previous
+
+    def test_project_onboarding_readiness_requires_a_durable_registry(self):
+        previous = main.PROJECT_ONBOARDING
+        main.PROJECT_ONBOARDING = ProjectOnboardingService(InMemoryProjectRegistry())
+        try:
+            response = self.client.get("/readiness/project-onboarding")
+        finally:
+            main.PROJECT_ONBOARDING = previous
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["status"], "READY")
