@@ -145,7 +145,13 @@ jobs:
           slug="$(jq --raw-output '.slug' <<<"$claim")"
           description="$(jq --raw-output '.description' <<<"$claim")"
           if ! result="$(python scripts/provision_project_repository.py --owner "$owner" --slug "$slug" --description "$description" --project-id "$PROJECT_ID")"; then
-            body='{"failure_code":"PROJECT_PROVISIONING_FAILED"}'
+            if [[ "$result" =~ ^PROVISION_FAILED:([A-Z][A-Z0-9_]{2,79})$ ]]; then
+              failure_code="${BASH_REMATCH[1]}"
+            else
+              failure_code="PROJECT_PROVISIONING_FAILED"
+            fi
+            echo "::error title=新規プロダクト作成に失敗::$failure_code"
+            body="$(jq -n --arg failure_code "$failure_code" '{failure_code: $failure_code}')"
             curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$body" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/fail-provisioning" >/dev/null
             exit 1
           fi
