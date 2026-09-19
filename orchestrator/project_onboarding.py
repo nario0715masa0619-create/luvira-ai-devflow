@@ -13,6 +13,9 @@ from enum import Enum
 import re
 from typing import Protocol
 
+from google.api_core.exceptions import AlreadyExists
+from google.cloud import firestore
+
 
 class ProjectOnboardingError(ValueError):
     pass
@@ -88,6 +91,62 @@ class InMemoryProjectRegistry:
 
     def save(self, record: ProjectRecord) -> None:
         self._records[record.project_id] = record
+
+
+def project_payload(record: ProjectRecord) -> dict:
+    return {
+        "project_id": record.project_id,
+        "owner": record.request.owner,
+        "slug": record.request.slug,
+        "description": record.request.description,
+        "status": record.status.value,
+        "repository": record.repository,
+        "bootstrap_commit": record.bootstrap_commit,
+        "github_app_ready": record.github_app_ready,
+        "failure_code": record.failure_code,
+    }
+
+
+def project_from_payload(payload: dict) -> ProjectRecord:
+    try:
+        request = NewProjectRequest(payload["owner"], payload["slug"], payload["description"])
+        record = ProjectRecord(
+            request=request, status=ProjectStatus(payload["status"]), repository=payload.get("repository"),
+            bootstrap_commit=payload.get("bootstrap_commit"),
+            github_app_ready=payload.get("github_app_ready", False), failure_code=payload.get("failure_code"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ProjectOnboardingError("project_record_invalid") from exc
+    if payload.get("project_id") != record.project_id:
+        raise ProjectOnboardingError("project_record_identity_invalid")
+    return record
+
+
+class FirestoreProjectRegistry:
+    """Durable registry; each product is addressed only by its approved slug."""
+
+    def __init__(self, client, collection: str = "devflow_projects") -> None:
+        if not isinstance(collection, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{2,62}", collection):
+            raise ProjectOnboardingError("project_collection_invalid")
+        self._collection = client.collection(collection)
+
+    def get(self, project_id: str) -> ProjectRecord:
+        snapshot = self._collection.document(project_id).get()
+        if not snapshot.exists:
+            raise ProjectOnboardingError("project_not_found")
+        return project_from_payload(snapshot.to_dict())
+
+    def save(self, record: ProjectRecord) -> None:
+        reference = self._collection.document(record.project_id)
+        payload = project_payload(record)
+        snapshot = reference.get()
+        if snapshot.exists:
+            reference.set(payload)
+            return
+        try:
+            reference.create(payload)
+        except AlreadyExists:
+            reference.set(payload)
 
 
 class ProjectOnboardingService:

@@ -6,6 +6,8 @@ from project_onboarding import (
     ProjectOnboardingError,
     ProjectOnboardingService,
     ProjectStatus,
+    project_from_payload,
+    project_payload,
 )
 
 
@@ -49,3 +51,10 @@ class ProjectOnboardingTest(unittest.TestCase):
     def test_invalid_slug_is_rejected_before_any_provisioning(self):
         with self.assertRaisesRegex(ProjectOnboardingError, "project_slug_invalid"):
             NewProjectRequest("nario0715masa0619-create", "Bad_Name", "x")
+
+    def test_durable_payload_cannot_be_rebound_to_another_project_id(self):
+        record = self.service.request(self.request)
+        payload = project_payload(record)
+        payload["project_id"] = "project-other-product"
+        with self.assertRaisesRegex(ProjectOnboardingError, "project_record_identity_invalid"):
+            project_from_payload(payload)
