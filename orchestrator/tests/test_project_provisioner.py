@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 from pathlib import Path
@@ -66,6 +67,50 @@ class ProjectProvisionerTest(unittest.TestCase):
         self.assertEqual(commit, "b" * 40)
         self.assertIn(".github/luvira-project.json", request.full_url)
         self.assertNotIn(b"token", request.data)
+
+    def test_resumes_when_the_exact_bootstrap_marker_already_exists(self):
+        calls = []
+        manifest = {
+            "schema_version": "luvira.devflow.project.v1",
+            "project_id": "project-new-product",
+            "control_repository": "nario0715masa0619-create/luvira-ai-devflow",
+            "base_commit": "a" * 40,
+        }
+
+        def opener(request, timeout):
+            calls.append(request)
+            if request.method == "PUT":
+                raise HTTPError(request.full_url, 409, "already exists", {}, None)
+            if "/contents/.github/luvira-project.json" in request.full_url:
+                return Response({"content": base64.b64encode(json.dumps(manifest).encode()).decode()})
+            if "/commits?path=" in request.full_url:
+                return Response([{"sha": "d" * 40}])
+            raise AssertionError(request.full_url)
+
+        commit = GitHubProjectProvisioner("token", opener).write_bootstrap_manifest(
+            self.request.repository, "project-new-product", "a" * 40,
+        )
+
+        self.assertEqual(commit, "d" * 40)
+        self.assertEqual([call.method for call in calls], ["PUT", "GET", "GET"])
+
+    def test_refuses_a_bootstrap_marker_owned_by_another_project(self):
+        manifest = {
+            "schema_version": "luvira.devflow.project.v1",
+            "project_id": "project-someone-else",
+            "control_repository": "nario0715masa0619-create/luvira-ai-devflow",
+            "base_commit": "a" * 40,
+        }
+
+        def opener(request, timeout):
+            if request.method == "PUT":
+                raise HTTPError(request.full_url, 409, "already exists", {}, None)
+            return Response({"content": base64.b64encode(json.dumps(manifest).encode()).decode()})
+
+        with self.assertRaisesRegex(ProjectOnboardingError, "project_bootstrap_identity_mismatch"):
+            GitHubProjectProvisioner("token", opener).write_bootstrap_manifest(
+                self.request.repository, "project-new-product", "a" * 40,
+            )
 
     def test_isolated_cli_loads_without_cloud_firestore(self):
         root = Path(__file__).parents[2]

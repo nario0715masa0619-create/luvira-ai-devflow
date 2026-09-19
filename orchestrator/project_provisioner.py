@@ -79,10 +79,36 @@ class GitHubProjectProvisioner:
             "base_commit": base_commit,
         }, ensure_ascii=False, indent=2) + "\n"
         encoded = base64.b64encode(contents.encode()).decode()
-        payload = self._call("PUT", f"/repos/{quote(repository, safe='/')}/contents/.github/luvira-project.json", {
-            "message": "DevFlowプロジェクト初期設定を追加",
-            "content": encoded,
-        })
+        path = ".github/luvira-project.json"
+        try:
+            payload = self._call("PUT", f"/repos/{quote(repository, safe='/')}/contents/{path}", {
+                "message": "DevFlowプロジェクト初期設定を追加",
+                "content": encoded,
+            })
+        except HTTPError as exc:
+            # A previous provision attempt may have written the marker before
+            # its completion callback failed.  Do not overwrite it blindly:
+            # resume only when the exact immutable project identity matches.
+            if exc.code != 409:
+                raise ProjectOnboardingError("project_bootstrap_write_failed") from exc
+            try:
+                existing = self._call("GET", f"/repos/{quote(repository, safe='/')}/contents/{path}")
+                raw = base64.b64decode(existing.get("content", ""), validate=True)
+                manifest = json.loads(raw.decode())
+            except (HTTPError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as recovery_error:
+                raise ProjectOnboardingError("project_bootstrap_recovery_missing") from recovery_error
+            if not isinstance(manifest, dict) or (
+                manifest.get("schema_version") != "luvira.devflow.project.v1"
+                or manifest.get("project_id") != project_id
+                or manifest.get("control_repository") != "nario0715masa0619-create/luvira-ai-devflow"
+                or not isinstance(manifest.get("base_commit"), str)
+                or len(manifest["base_commit"]) != 40
+            ):
+                raise ProjectOnboardingError("project_bootstrap_identity_mismatch")
+            history = self._call_list(
+                f"/repos/{quote(repository, safe='/')}/commits?path={quote(path, safe='/')}&per_page=1"
+            )
+            payload = {"commit": history[0] if history else {}}
         commit = ((payload.get("commit") or {}).get("sha"))
         if not isinstance(commit, str) or len(commit) != 40:
             raise ProjectOnboardingError("project_bootstrap_commit_missing")
@@ -105,5 +131,22 @@ class GitHubProjectProvisioner:
         with self._opener(request, timeout=10) as response:  # nosec B310: fixed GitHub API endpoint
             payload = json.loads(response.read().decode())
         if not isinstance(payload, dict):
+            raise ProjectOnboardingError("project_github_response_invalid")
+        return payload
+
+    def _call_list(self, path: str) -> list[dict[str, Any]]:
+        request = Request(
+            GITHUB_API_URL + path,
+            method="GET",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self._token}",
+                "User-Agent": "luvira-devflow-project-provisioner/1",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        with self._opener(request, timeout=10) as response:  # nosec B310: fixed GitHub API endpoint
+            payload = json.loads(response.read().decode())
+        if not isinstance(payload, list) or not all(isinstance(item, dict) for item in payload):
             raise ProjectOnboardingError("project_github_response_invalid")
         return payload
