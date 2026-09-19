@@ -186,9 +186,13 @@ class ProjectOnboardingService:
 
     def approve(self, project_id: str) -> ProjectRecord:
         record = self._registry.get(project_id)
-        if record.status is not ProjectStatus.REQUESTED:
+        # A failed attempt never changes the immutable request.  It may be
+        # retried only by sending the exact same request through human
+        # approval again; this avoids both duplicate repositories and silent
+        # retries after a credential or GitHub-side repair.
+        if record.status not in {ProjectStatus.REQUESTED, ProjectStatus.PROVISION_FAILED}:
             raise ProjectOnboardingError("project_approval_state_invalid")
-        return self._save(replace(record, status=ProjectStatus.APPROVED))
+        return self._save(replace(record, status=ProjectStatus.APPROVED, failure_code=None))
 
     def begin_provisioning(self, project_id: str) -> ProjectRecord:
         record = self._registry.get(project_id)

@@ -312,7 +312,11 @@ def pending_project_onboarding(project_id):
         record = service.get(project_id)
     except ProjectOnboardingError as exc:
         return jsonify(status="BLOCKED", reason=str(exc)), 404
-    if record.status is not ProjectStatus.REQUESTED:
+    # A terminal provisioning failure is deliberately re-presented for a
+    # fresh human decision.  The immutable approval binding remains derived
+    # from the original request, while the transition itself is never
+    # automatic.
+    if record.status not in {ProjectStatus.REQUESTED, ProjectStatus.PROVISION_FAILED}:
         return jsonify(status="BLOCKED", reason="project_approval_not_pending"), 409
     return jsonify(status="AWAITING_HUMAN_APPROVAL", project_id=record.project_id,
                    approval_binding=project_approval_binding(record)), 200

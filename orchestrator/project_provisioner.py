@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 from typing import Any, Callable
+from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -33,16 +34,29 @@ class GitHubProjectProvisioner:
         full name must still match the owner approved in the request; a token
         for another account therefore fails closed.
         """
-        payload = self._call("POST", "/user/repos", {
-            "name": request.slug,
-            "description": request.description.strip(),
-            "private": True,
-            "auto_init": True,
-            "has_issues": True,
-        })
+        try:
+            payload = self._call("POST", "/user/repos", {
+                "name": request.slug,
+                "description": request.description.strip(),
+                "private": True,
+                "auto_init": True,
+                "has_issues": True,
+            })
+        except HTTPError as exc:
+            # A request can fail after GitHub has created the repository but
+            # before the bootstrap manifest is written.  Resume only the one
+            # repository named in the immutable approved request; never pick
+            # a different destination or create a suffix repository.
+            if exc.code != 422:
+                raise ProjectOnboardingError("project_repository_create_failed") from exc
+            try:
+                payload = self._call("GET", f"/repos/{quote(request.repository, safe='/')}")
+            except HTTPError as recovery_error:
+                raise ProjectOnboardingError("project_repository_recovery_missing") from recovery_error
         repository = payload.get("full_name")
         default_branch = payload.get("default_branch")
-        if repository != request.repository or not isinstance(default_branch, str) or not default_branch:
+        if (repository != request.repository or payload.get("private") is not True
+                or not isinstance(default_branch, str) or not default_branch):
             raise ProjectOnboardingError("project_creation_identity_mismatch")
         ref = self._call("GET", f"/repos/{quote(repository, safe='/')}/git/ref/heads/{quote(default_branch, safe='')}")
         commit = ((ref.get("object") or {}).get("sha"))

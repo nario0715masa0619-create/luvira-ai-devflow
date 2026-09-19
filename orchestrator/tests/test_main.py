@@ -424,6 +424,16 @@ read
             })
             self.assertEqual(failed.status_code, 200)
             self.assertEqual(failed.json["status"], "PROVISION_FAILED")
+
+            # A recovery needs the same protected human approval again; it
+            # must not silently retry from a terminal failure.
+            retry_pending = self.client.get(f"/control-plane/v3/projects/{project_id}/pending")
+            self.assertEqual(retry_pending.status_code, 200)
+            retry_authorized = self.client.post(f"/control-plane/v3/projects/{project_id}/authorize", json={
+                "actor": "nario0715masa0619-create", "approval_binding": retry_pending.json["approval_binding"],
+            })
+            self.assertEqual(retry_authorized.status_code, 200)
+            self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/claim-provisioning").status_code, 200)
         finally:
             main.PROJECT_ONBOARDING = previous
 
