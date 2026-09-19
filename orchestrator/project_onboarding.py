@@ -13,8 +13,14 @@ from enum import Enum
 import re
 from typing import Protocol
 
-from google.api_core.exceptions import AlreadyExists
-from google.cloud import firestore
+try:
+    from google.api_core.exceptions import AlreadyExists
+    from google.cloud import firestore
+except ModuleNotFoundError:  # The isolated GitHub provisioner needs only the domain model.
+    firestore = None
+
+    class AlreadyExists(Exception):
+        pass
 
 
 class ProjectOnboardingError(ValueError):
@@ -129,6 +135,8 @@ class FirestoreProjectRegistry:
     """Durable registry; each product is addressed only by its approved slug."""
 
     def __init__(self, client, collection: str = "devflow_projects") -> None:
+        if firestore is None:
+            raise ProjectOnboardingError("project_firestore_dependency_missing")
         if not isinstance(collection, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_-]{2,62}", collection):
             raise ProjectOnboardingError("project_collection_invalid")
         self._collection = client.collection(collection)

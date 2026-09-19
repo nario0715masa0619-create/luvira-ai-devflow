@@ -32,6 +32,26 @@ Orcaからの新規プロダクト依頼は、専用リポジトリが作成・�
 プロジェクトID・司令塔リポジトリ・基点コミットだけを記録し、トークン・鍵・
 Webhook secret は一切入れない。
 
+## 実行承認と専用環境
+
+GitHub Actionsの `新規プロダクト作成を承認` は、通常の `human-approval`
+Environmentで依頼の不変スナップショットを承認する。その後に、別の
+`project-provisioning` Environmentで、リポジトリ作成だけを許可する。後者には
+`PROJECT_PROVISIONING_TOKEN`（新規作成専用）だけを設定する。通常Workerの認証情報、
+OpenCodeキー、既存プロダクトの公開認証情報を
+このEnvironmentへ追加してはならない。
+
+作成実行は、専用OIDC ID `github-project-provisioning` /
+`devflow-project-provisioner` がControl Planeの`claim-provisioning`を呼べるように
+設定されるまで失敗する。この設定が済む前にトークンだけでリポジトリを作成する
+経路は存在しない。作成後はControl Planeが保持するGitHub Appで実インストールと
+初期コミットを照合し、合わなければ`PROVISION_FAILED`へ終端する。Appの秘密鍵は
+作成Environmentへ渡さない。
+
+OIDCの固定条件と最小権限は
+`security/workload-identity/github-project-provisioning.json` に記録する。契約と
+workflowが食い違うPRは自動検証で停止する。
+
 ## 既存環境への影響
 
 既存の `luvira-ai-devflow` 固定の実行経路は変更しない。この契約に従う新規プロダクト経路が
