@@ -94,7 +94,13 @@ class GitHubProjectProvisioner:
                 raise ProjectOnboardingError("project_bootstrap_write_failed") from exc
             try:
                 existing = self._call("GET", f"/repos/{quote(repository, safe='/')}/contents/{path}")
-                raw = base64.b64decode(existing.get("content", ""), validate=True)
+                encoded_existing = existing.get("content", "")
+                if not isinstance(encoded_existing, str):
+                    raise ValueError("project_bootstrap_content_invalid")
+                # GitHub line-wraps the Base64 response.  Strip transport
+                # whitespace before strict decoding; keep validation enabled
+                # so malformed payloads still fail closed.
+                raw = base64.b64decode("".join(encoded_existing.split()), validate=True)
                 manifest = json.loads(raw.decode())
             except (HTTPError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as recovery_error:
                 raise ProjectOnboardingError("project_bootstrap_recovery_missing") from recovery_error
