@@ -141,6 +141,16 @@ jobs:
           set -euo pipefail
           claim="$(curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/claim-provisioning")"
           test "$(jq --raw-output '.status' <<<"$claim")" = "PROVISIONING"
+          preflight="$(curl --silent --show-error --write-out $'\n%{http_code}' --header "Authorization: Bearer $ID_TOKEN" "$ORCHESTRATOR_URL/readiness/project-provisioning" || true)"
+          preflight_status="${preflight##*$'\n'}"
+          preflight_body="${preflight%$'\n'*}"
+          if [[ "$preflight_status" != "200" ]]; then
+            failure_code="$(jq --raw-output '.reason // "PROJECT_PROVISIONING_READINESS_UNAVAILABLE"' <<<"$preflight_body" 2>/dev/null || echo PROJECT_PROVISIONING_READINESS_UNAVAILABLE)"
+            echo "::error title=新規プロダクト作成の事前検証に失敗::$failure_code"
+            body="$(jq -n --arg failure_code "$failure_code" '{failure_code: $failure_code}')"
+            curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$body" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/fail-provisioning" >/dev/null
+            exit 1
+          fi
           owner="$(jq --raw-output '.owner' <<<"$claim")"
           slug="$(jq --raw-output '.slug' <<<"$claim")"
           description="$(jq --raw-output '.description' <<<"$claim")"
@@ -160,9 +170,14 @@ jobs:
           body="$(jq -n --arg repository "$repository" --arg bootstrap_commit "$bootstrap_commit" '{repository: $repository, bootstrap_commit: $bootstrap_commit, github_app_ready: true}')"
           checkpoint="$(jq -n --arg repository "$repository" --arg bootstrap_commit "$bootstrap_commit" '{repository: $repository, bootstrap_commit: $bootstrap_commit}')"
           curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$checkpoint" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/checkpoint-provisioning" >/dev/null
-          if ! completed="$(curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$body" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/complete-provisioning")"; then
-            failure='{"failure_code":"PROJECT_APP_READINESS_FAILED"}'
+          completed="$(curl --silent --show-error --write-out $'\n%{http_code}' --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$body" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/complete-provisioning" || true)"
+          completed_status="${completed##*$'\n'}"
+          completed_body="${completed%$'\n'*}"
+          if [[ "$completed_status" != "200" ]]; then
+            failure_code="$(jq --raw-output '.reason // "PROJECT_COMPLETION_UNAVAILABLE"' <<<"$completed_body" 2>/dev/null || echo PROJECT_COMPLETION_UNAVAILABLE)"
+            echo "::error title=新規プロダクト作成の完了検証に失敗::$failure_code"
+            failure="$(jq -n --arg failure_code "$failure_code" '{failure_code: $failure_code}')"
             curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$failure" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/fail-provisioning" >/dev/null
             exit 1
           fi
-          test "$(jq --raw-output '.status' <<<"$completed")" = "READY"
+          test "$(jq --raw-output '.status' <<<"$completed_body")" = "READY"
