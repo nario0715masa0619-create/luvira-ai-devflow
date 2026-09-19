@@ -99,7 +99,8 @@ class ProjectProvisionerTest(unittest.TestCase):
                     if request.method == "PUT":
                         raise HTTPError(request.full_url, conflict_status, "already exists", {}, None)
                     if "/contents/.github/luvira-project.json" in request.full_url:
-                        return Response({"content": base64.b64encode(json.dumps(manifest).encode()).decode()})
+                        encoded = base64.b64encode(json.dumps(manifest).encode()).decode()
+                        return Response({"content": encoded[:20] + "\n" + encoded[20:]})
                     if "/commits?path=" in request.full_url:
                         return Response([{"sha": "d" * 40}])
                     raise AssertionError(request.full_url)
