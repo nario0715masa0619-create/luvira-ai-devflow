@@ -18,6 +18,7 @@ from project_onboarding import NewProjectRequest, ProjectOnboardingError
 
 
 GITHUB_API_URL = "https://api.github.com"
+RECOVERABLE_GITHUB_CONFLICTS = frozenset({409, 422})
 
 
 class GitHubProjectProvisioner:
@@ -47,7 +48,7 @@ class GitHubProjectProvisioner:
             # before the bootstrap manifest is written.  Resume only the one
             # repository named in the immutable approved request; never pick
             # a different destination or create a suffix repository.
-            if exc.code not in {409, 422}:
+            if exc.code not in RECOVERABLE_GITHUB_CONFLICTS:
                 raise ProjectOnboardingError("project_repository_create_failed") from exc
             try:
                 payload = self._call("GET", f"/repos/{quote(request.repository, safe='/')}")
@@ -89,7 +90,7 @@ class GitHubProjectProvisioner:
             # A previous provision attempt may have written the marker before
             # its completion callback failed.  Do not overwrite it blindly:
             # resume only when the exact immutable project identity matches.
-            if exc.code != 409:
+            if exc.code not in RECOVERABLE_GITHUB_CONFLICTS:
                 raise ProjectOnboardingError("project_bootstrap_write_failed") from exc
             try:
                 existing = self._call("GET", f"/repos/{quote(repository, safe='/')}/contents/{path}")
