@@ -4,6 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from urllib.error import HTTPError
 
 from project_onboarding import NewProjectRequest, ProjectOnboardingError
 from project_provisioner import GitHubProjectProvisioner
@@ -25,7 +26,7 @@ class ProjectProvisionerTest(unittest.TestCase):
         def opener(request, timeout):
             calls.append(request)
             if request.full_url.endswith("/user/repos"):
-                return Response({"full_name": self.request.repository, "default_branch": "main"})
+                return Response({"full_name": self.request.repository, "default_branch": "main", "private": True})
             return Response({"object": {"sha": "a" * 40}})
         repository, commit = GitHubProjectProvisioner("token", opener).create_repository(self.request)
         self.assertEqual((repository, commit), (self.request.repository, "a" * 40))
@@ -33,9 +34,25 @@ class ProjectProvisionerTest(unittest.TestCase):
 
     def test_rejects_a_repository_created_under_the_wrong_owner(self):
         def opener(_request, timeout):
-            return Response({"full_name": "other/new-product", "default_branch": "main"})
+            return Response({"full_name": "other/new-product", "default_branch": "main", "private": True})
         with self.assertRaisesRegex(ProjectOnboardingError, "project_creation_identity_mismatch"):
             GitHubProjectProvisioner("token", opener).create_repository(self.request)
+
+    def test_resumes_only_the_exact_repository_after_a_partial_creation(self):
+        calls = []
+        def opener(request, timeout):
+            calls.append(request)
+            if request.full_url.endswith("/user/repos"):
+                raise HTTPError(request.full_url, 422, "already exists", {}, None)
+            if request.full_url.endswith(f"/repos/{self.request.repository}"):
+                return Response({"full_name": self.request.repository, "default_branch": "main", "private": True})
+            return Response({"object": {"sha": "c" * 40}})
+
+        repository, commit = GitHubProjectProvisioner("token", opener).create_repository(self.request)
+
+        self.assertEqual((repository, commit), (self.request.repository, "c" * 40))
+        self.assertEqual(len(calls), 3)
+        self.assertTrue(calls[1].full_url.endswith(f"/repos/{self.request.repository}"))
 
     def test_manifest_is_a_non_secret_project_marker(self):
         request = None
