@@ -1,0 +1,160 @@
+name: 新規プロダクト作成を承認
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: Control Planeが発行した新規プロダクトID
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validate_project:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        id: discovery_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval-discovery
+          service_account: devflow-approval-check@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+      - name: Discover the canonical orchestrator endpoint
+        id: orchestrator
+        run: |
+          set -euo pipefail
+          url="$(gcloud run services describe luvira-devflow-orchestrator --region us-central1 --project luvira-ai-control-plane --format='value(status.url)')"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@v2
+        id: request_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval-discovery
+          service_account: devflow-approval-check@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+          token_format: id_token
+          id_token_audience: ${{ steps.orchestrator.outputs.url }}
+          id_token_include_email: true
+      - name: Verify the product request is ready for approval
+        env:
+          ID_TOKEN: ${{ steps.request_auth.outputs.id_token }}
+          ORCHESTRATOR_URL: ${{ steps.orchestrator.outputs.url }}
+          PROJECT_ID: ${{ inputs.project_id }}
+        run: |
+          set -euo pipefail
+          pending="$(curl --fail --silent --show-error --header "Authorization: Bearer $ID_TOKEN" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/pending")"
+          test "$(jq --raw-output '.status' <<<"$pending")" = "AWAITING_HUMAN_APPROVAL"
+          jq --raw-output '.approval_binding' <<<"$pending" > approval_binding.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: project-approval-binding
+          path: approval_binding.txt
+          retention-days: 1
+
+  authorize:
+    needs: validate_project
+    environment: human-approval
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: project-approval-binding
+      - uses: google-github-actions/auth@v2
+        id: discovery_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval
+          service_account: devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+      - name: Discover the canonical orchestrator endpoint
+        id: orchestrator
+        run: |
+          set -euo pipefail
+          url="$(gcloud run services describe luvira-devflow-orchestrator --region us-central1 --project luvira-ai-control-plane --format='value(status.url)')"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@v2
+        id: request_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval
+          service_account: devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+          token_format: id_token
+          id_token_audience: ${{ steps.orchestrator.outputs.url }}
+          id_token_include_email: true
+      - name: Record the immutable human authorization
+        env:
+          ID_TOKEN: ${{ steps.request_auth.outputs.id_token }}
+          ORCHESTRATOR_URL: ${{ steps.orchestrator.outputs.url }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          approval_binding="$(cat approval_binding.txt)"
+          body="$(jq -n --arg approval_binding "$approval_binding" --arg actor "$ACTOR" '{approval_binding: $approval_binding, actor: $actor}')"
+          response="$(curl --fail --silent --show-error --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$body" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/authorize")"
+          test "$(jq --raw-output '.status' <<<"$response")" = "AUTHORIZED"
+
+  provision:
+    needs: authorize
+    environment: project-provisioning
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        id: discovery_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-project-provisioning
+          service_account: devflow-project-provisioner@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+      - name: Discover the canonical orchestrator endpoint
+        id: orchestrator
+        run: |
+          set -euo pipefail
+          url="$(gcloud run services describe luvira-devflow-orchestrator --region us-central1 --project luvira-ai-control-plane --format='value(status.url)')"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@v2
+        id: request_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-project-provisioning
+          service_account: devflow-project-provisioner@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+          token_format: id_token
+          id_token_audience: ${{ steps.orchestrator.outputs.url }}
+          id_token_include_email: true
+      - name: Require the isolated provisioning credential
+        env:
+          PROJECT_PROVISIONING_TOKEN: ${{ secrets.PROJECT_PROVISIONING_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "$PROJECT_PROVISIONING_TOKEN"
+      - name: Provision the approved private repository
+        env:
+          ID_TOKEN: ${{ steps.request_auth.outputs.id_token }}
+          ORCHESTRATOR_URL: ${{ steps.orchestrator.outputs.url }}
+          PROJECT_ID: ${{ inputs.project_id }}
+          PROJECT_PROVISIONING_TOKEN: ${{ secrets.PROJECT_PROVISIONING_TOKEN }}
+        run: |
+          set -euo pipefail
+          claim="$(curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/claim-provisioning")"
+          test "$(jq --raw-output '.status' <<<"$claim")" = "PROVISIONING"
+          owner="$(jq --raw-output '.owner' <<<"$claim")"
+          slug="$(jq --raw-output '.slug' <<<"$claim")"
+          description="$(jq --raw-output '.description' <<<"$claim")"
+          if ! result="$(python scripts/provision_project_repository.py --owner "$owner" --slug "$slug" --description "$description" --project-id "$PROJECT_ID")"; then
+            body='{"failure_code":"PROJECT_PROVISIONING_FAILED"}'
+            curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$body" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/fail-provisioning" >/dev/null
+            exit 1
+          fi
+          IFS=: read -r status repository bootstrap_commit <<<"$result"
+          test "$status" = "PROVISION_READY"
+          body="$(jq -n --arg repository "$repository" --arg bootstrap_commit "$bootstrap_commit" '{repository: $repository, bootstrap_commit: $bootstrap_commit, github_app_ready: true}')"
+          if ! completed="$(curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$body" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/complete-provisioning")"; then
+            failure='{"failure_code":"PROJECT_APP_READINESS_FAILED"}'
+            curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$failure" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/fail-provisioning" >/dev/null
+            exit 1
+          fi
+          test "$(jq --raw-output '.status' <<<"$completed")" = "READY"

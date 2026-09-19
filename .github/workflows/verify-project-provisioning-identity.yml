@@ -1,0 +1,22 @@
+name: Verify project provisioning identity
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/authorize-project-onboarding.yml
+      - .github/workflows/verify-project-provisioning-identity.yml
+      - security/workload-identity/github-project-provisioning.json
+      - scripts/verify_project_provisioning_identity.py
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/verify_project_provisioning_identity.py

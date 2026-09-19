@@ -359,13 +359,31 @@ def complete_project_provisioning(project_id):
         return blocked
     payload = request.get_json(silent=True) or {}
     try:
+        repository = payload.get("repository", "")
+        bootstrap_commit = payload.get("bootstrap_commit", "")
+        if not github_project_repository_ready(repository, bootstrap_commit):
+            raise ProjectOnboardingError("project_github_app_or_commit_not_ready")
         record = service.complete_provisioning(
-            project_id, payload.get("repository", ""), payload.get("bootstrap_commit", ""),
-            payload.get("github_app_ready") is True,
+            project_id, repository, bootstrap_commit, True,
         )
     except ProjectOnboardingError as exc:
         return jsonify(status="BLOCKED", reason=str(exc)), 409
     return jsonify(status="READY", project_id=record.project_id, repository=record.repository), 200
+
+
+@app.post("/control-plane/v3/projects/<project_id>/fail-provisioning")
+def fail_project_provisioning(project_id):
+    """Record a terminal provisioning result without choosing another target."""
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    payload = request.get_json(silent=True) or {}
+    try:
+        record = service.fail_provisioning(project_id, payload.get("failure_code", ""))
+    except ProjectOnboardingError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 409
+    return jsonify(status="PROVISION_FAILED", project_id=record.project_id,
+                   failure_code=record.failure_code), 200
 
 
 @app.post("/internal/broker/sweep")
@@ -679,6 +697,41 @@ def github_worker_installation_token():
     if not isinstance(token, str) or not token:
         raise ValueError("invalid_installation_token")
     return token
+
+
+def github_project_repository_ready(repository, bootstrap_commit):
+    """Verify App installation and bootstrap commit without exposing App credentials."""
+    if not isinstance(repository, str) or repository.count("/") != 1:
+        return False
+    if not isinstance(bootstrap_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", bootstrap_commit):
+        return False
+    app_id = os.environ.get("GITHUB_WORKER_APP_ID", "")
+    private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
+    if not app_id or not private_key:
+        return False
+    try:
+        now = int(time.time())
+        app_jwt = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": app_id}, private_key, algorithm="RS256")
+        installation_request = Request(
+            f"{GITHUB_API_URL}/repos/{repository}/installation",
+            headers={
+                "Authorization": f"Bearer {app_jwt}",
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "luvira-devflow-project-readiness/1",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        with urlopen(installation_request, timeout=10) as response:  # nosec B310: fixed GitHub HTTPS endpoint
+            installation = json.loads(response.read().decode())
+        if not isinstance(installation, dict) or str(installation.get("app_id", "")) != app_id:
+            return False
+        commit = github_api_request(
+            f"{GITHUB_API_URL}/repos/{repository}/git/commits/{bootstrap_commit}",
+            token=github_worker_installation_token(),
+        )
+    except (ValueError, HTTPError, URLError, OSError):
+        return False
+    return commit.get("sha") == bootstrap_commit
 
 
 def opencode_go_model_count(api_key):

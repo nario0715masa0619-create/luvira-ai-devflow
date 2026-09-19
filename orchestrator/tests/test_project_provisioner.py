@@ -1,4 +1,8 @@
 import json
+import os
+from pathlib import Path
+import subprocess
+import sys
 import unittest
 
 from project_onboarding import NewProjectRequest, ProjectOnboardingError
@@ -45,3 +49,15 @@ class ProjectProvisionerTest(unittest.TestCase):
         self.assertEqual(commit, "b" * 40)
         self.assertIn(".github/luvira-project.json", request.full_url)
         self.assertNotIn(b"token", request.data)
+
+    def test_isolated_cli_loads_without_cloud_firestore(self):
+        root = Path(__file__).parents[2]
+        environment = os.environ | {"PYTHONPATH": ""}
+        result = subprocess.run(
+            [sys.executable, str(root / "scripts" / "provision_project_repository.py"),
+             "--owner", self.request.owner, "--slug", self.request.slug,
+             "--description", self.request.description, "--project-id", "project-new-product"],
+            text=True, capture_output=True, env=environment, check=False,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("project_provisioning_credential_missing", result.stdout)

@@ -419,6 +419,11 @@ read
             claimed = self.client.post(f"/control-plane/v3/projects/{project_id}/claim-provisioning")
             self.assertEqual(claimed.status_code, 200)
             self.assertEqual(claimed.json["status"], "PROVISIONING")
+            failed = self.client.post(f"/control-plane/v3/projects/{project_id}/fail-provisioning", json={
+                "failure_code": "GITHUB_APP_NOT_INSTALLED",
+            })
+            self.assertEqual(failed.status_code, 200)
+            self.assertEqual(failed.json["status"], "PROVISION_FAILED")
         finally:
             main.PROJECT_ONBOARDING = previous
 
@@ -435,6 +440,25 @@ read
             )
             self.assertEqual(response.status_code, 409)
             self.assertEqual(response.json["reason"], "project_approval_binding_mismatch")
+        finally:
+            main.PROJECT_ONBOARDING = previous
+
+    def test_project_onboarding_completion_requires_control_plane_app_evidence(self):
+        previous = main.PROJECT_ONBOARDING
+        main.PROJECT_ONBOARDING = ProjectOnboardingService(InMemoryProjectRegistry())
+        try:
+            created = self.client.post("/control-plane/v3/projects", json={
+                "owner": "nario0715masa0619-create", "slug": "new-product", "description": "新規プロダクト",
+            })
+            project_id = created.json["project_id"]
+            binding = self.client.get(f"/control-plane/v3/projects/{project_id}/pending").json["approval_binding"]
+            self.client.post(f"/control-plane/v3/projects/{project_id}/authorize", json={"actor": "nario0715masa0619-create", "approval_binding": binding})
+            self.client.post(f"/control-plane/v3/projects/{project_id}/claim-provisioning")
+            payload = {"repository": "nario0715masa0619-create/new-product", "bootstrap_commit": "a" * 40}
+            with patch("main.github_project_repository_ready", return_value=False):
+                self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/complete-provisioning", json=payload).status_code, 409)
+            with patch("main.github_project_repository_ready", return_value=True):
+                self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/complete-provisioning", json=payload).status_code, 200)
         finally:
             main.PROJECT_ONBOARDING = previous
 
