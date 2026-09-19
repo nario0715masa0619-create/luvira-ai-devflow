@@ -55,6 +55,21 @@ class ProjectProvisionerTest(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertTrue(calls[1].full_url.endswith(f"/repos/{self.request.repository}"))
 
+    def test_recovers_the_exact_repository_when_github_returns_a_conflict(self):
+        calls = []
+        def opener(request, timeout):
+            calls.append(request)
+            if request.full_url.endswith("/user/repos"):
+                raise HTTPError(request.full_url, 409, "concurrent create", {}, None)
+            if request.full_url.endswith(f"/repos/{self.request.repository}"):
+                return Response({"full_name": self.request.repository, "default_branch": "main", "private": True})
+            return Response({"object": {"sha": "c" * 40}})
+
+        repository, commit = GitHubProjectProvisioner("token", opener).create_repository(self.request)
+
+        self.assertEqual((repository, commit), (self.request.repository, "c" * 40))
+        self.assertEqual(len(calls), 3)
+
     def test_manifest_is_a_non_secret_project_marker(self):
         request = None
         def opener(value, timeout):
@@ -122,4 +137,4 @@ class ProjectProvisionerTest(unittest.TestCase):
             text=True, capture_output=True, env=environment, check=False,
         )
         self.assertEqual(result.returncode, 1)
-        self.assertIn("project_provisioning_credential_missing", result.stdout)
+        self.assertIn("PROJECT_PROVISIONING_CREDENTIAL_MISSING", result.stdout)

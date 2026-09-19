@@ -47,7 +47,7 @@ class GitHubProjectProvisioner:
             # before the bootstrap manifest is written.  Resume only the one
             # repository named in the immutable approved request; never pick
             # a different destination or create a suffix repository.
-            if exc.code != 422:
+            if exc.code not in {409, 422}:
                 raise ProjectOnboardingError("project_repository_create_failed") from exc
             try:
                 payload = self._call("GET", f"/repos/{quote(request.repository, safe='/')}")

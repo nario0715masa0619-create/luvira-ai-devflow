@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -28,7 +29,8 @@ def main() -> int:
         repository, initial_commit = provisioner.create_repository(request)
         bootstrap_commit = provisioner.write_bootstrap_manifest(repository, args.project_id, initial_commit)
     except ProjectOnboardingError as exc:
-        print(f"PROVISION_FAILED:{exc}")
+        code = re.sub(r"[^A-Z0-9_]", "_", str(exc).upper())[:64]
+        print(f"PROVISION_FAILED:PROJECT_PROVISIONING_{code}")
         return 1
     print(f"PROVISION_READY:{repository}:{bootstrap_commit}")
     return 0

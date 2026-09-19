@@ -23,6 +23,8 @@ class ProjectProvisioningWorkflowTest(unittest.TestCase):
         self.assertIn("/checkpoint-provisioning", workflow)
         self.assertIn("/complete-provisioning", workflow)
         self.assertIn("/fail-provisioning", workflow)
+        self.assertIn("PROJECT_PROVISIONING_FAILED", workflow)
+        self.assertIn("新規プロダクト作成に失敗", workflow)
         self.assertNotIn("GITHUB_APP_PRIVATE_KEY", workflow)
         self.assertNotIn("GITHUB_WORKER", workflow)
         self.assertNotIn("OPENCODE", workflow)
