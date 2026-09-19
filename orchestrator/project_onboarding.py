@@ -92,6 +92,9 @@ class InMemoryProjectRegistry:
     def save(self, record: ProjectRecord) -> None:
         self._records[record.project_id] = record
 
+    def readiness_check(self) -> None:
+        return None
+
 
 def project_payload(record: ProjectRecord) -> dict:
     return {
@@ -148,6 +151,9 @@ class FirestoreProjectRegistry:
         except AlreadyExists:
             reference.set(payload)
 
+    def readiness_check(self) -> None:
+        list(self._collection.limit(1).stream())
+
 
 class ProjectOnboardingService:
     """State machine; adapters perform GitHub calls outside this policy layer."""
@@ -166,6 +172,9 @@ class ProjectOnboardingService:
 
     def get(self, project_id: str) -> ProjectRecord:
         return self._registry.get(project_id)
+
+    def readiness_check(self) -> None:
+        self._registry.readiness_check()
 
     def approve(self, project_id: str) -> ProjectRecord:
         record = self._registry.get(project_id)
