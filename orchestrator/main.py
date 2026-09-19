@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 import jwt
 from flask import Flask, jsonify, request
 from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.cloud import firestore
 from google.oauth2 import id_token
 
 from v3_runtime import create_v3_queue_service
@@ -22,6 +23,14 @@ from autonomous_broker import AutonomousBroker
 from approval_expiry_service import ApprovalExpiryService
 from implementation_artifact_verifier import verify_implementation_artifact, ImplementationArtifactError
 from opencode_implementation_client import OpenCodeImplementationClient, OpenCodeImplementationError
+from project_onboarding import (
+    FirestoreProjectRegistry,
+    NewProjectRequest,
+    ProjectOnboardingError,
+    ProjectOnboardingService,
+    ProjectStatus,
+    project_payload,
+)
 
 app = Flask(__name__)
 EXPECTED_REPOSITORY = os.environ.get("EXPECTED_REPOSITORY", "nario0715masa0619-create/luvira-ai-devflow")
@@ -45,6 +54,7 @@ WORKER_ARTIFACT_VIEW = os.environ.get("ISOLATED_WORKER_ARTIFACT_VIEW", "").strip
 VERIFIED_ARTIFACT_COLLECTION = os.environ.get("V3_VERIFIED_ARTIFACT_COLLECTION", "").strip()
 IMPLEMENTATION_ARTIFACT_COLLECTION = os.environ.get("V3_IMPLEMENTATION_ARTIFACT_COLLECTION", "").strip()
 RUNTIME_HEALTH_COLLECTION = os.environ.get("V3_RUNTIME_HEALTH_COLLECTION", "").strip()
+PROJECT_REGISTRY_COLLECTION = os.environ.get("V3_PROJECT_REGISTRY_COLLECTION", "").strip()
 OPENCODE_IMPLEMENTATION_MODEL = os.environ.get("OPENCODE_IMPLEMENTATION_MODEL", "kimi-k2.6").strip()
 # The protected human-approval workflow is the sole external trigger for the
 # Broker.  It already has Cloud Run Invoker and an immutable approval binding.
@@ -99,6 +109,18 @@ V3_AUTONOMOUS_BROKER = AutonomousBroker(
     V3_QUEUE_RUNTIME.implementation, V3_QUEUE_RUNTIME.publication, V3_QUEUE_RUNTIME.completion,
     V3_QUEUE_RUNTIME.runtime_watchdog, ApprovalExpiryService(V3_TASK_STORE),
 ) if V3_QUEUE_RUNTIME else None
+
+
+def create_project_onboarding_from_environment():
+    """Provisioning is opt-in and cannot change the existing task queue."""
+    if not os.environ.get("K_SERVICE") or not PROJECT_REGISTRY_COLLECTION:
+        return None
+    return ProjectOnboardingService(
+        FirestoreProjectRegistry(firestore.Client(), PROJECT_REGISTRY_COLLECTION)
+    )
+
+
+PROJECT_ONBOARDING = create_project_onboarding_from_environment()
 
 
 @app.before_request
@@ -235,6 +257,101 @@ def pending_approval_issue(issue_number):
         return jsonify(status="BLOCKED", reason=str(exc)), 404
     return jsonify(status="AWAITING_HUMAN_APPROVAL", task_id=task.task_id,
                    approval_binding=task.approval_binding), 200
+
+
+def project_approval_binding(record):
+    """Bind a human decision to exactly one immutable onboarding request."""
+    canonical = json.dumps(project_payload(record), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def project_service_or_blocked():
+    if PROJECT_ONBOARDING is None:
+        return None, (jsonify(status="BLOCKED", reason="project_onboarding_not_configured"), 503)
+    return PROJECT_ONBOARDING, None
+
+
+@app.post("/control-plane/v3/projects")
+def request_project_onboarding():
+    """Register an Orca product request; this endpoint never creates a repo."""
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    payload = request.get_json(silent=True) or {}
+    try:
+        record = service.request(NewProjectRequest(
+            owner=payload.get("owner", ""), slug=payload.get("slug", ""),
+            description=payload.get("description", ""),
+        ))
+    except ProjectOnboardingError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 400
+    return jsonify(status="AWAITING_HUMAN_APPROVAL", project_id=record.project_id,
+                   approval_binding=project_approval_binding(record)), 201
+
+
+@app.get("/control-plane/v3/projects/<project_id>/pending")
+def pending_project_onboarding(project_id):
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    try:
+        record = service.get(project_id)
+    except ProjectOnboardingError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 404
+    if record.status is not ProjectStatus.REQUESTED:
+        return jsonify(status="BLOCKED", reason="project_approval_not_pending"), 409
+    return jsonify(status="AWAITING_HUMAN_APPROVAL", project_id=record.project_id,
+                   approval_binding=project_approval_binding(record)), 200
+
+
+@app.post("/control-plane/v3/projects/<project_id>/authorize")
+def authorize_project_onboarding(project_id):
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    payload = request.get_json(silent=True) or {}
+    actor, binding = payload.get("actor"), payload.get("approval_binding")
+    if not isinstance(actor, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,38}", actor):
+        return jsonify(status="BLOCKED", reason="approval_actor_invalid"), 400
+    try:
+        record = service.get(project_id)
+        if not isinstance(binding, str) or not hmac.compare_digest(binding, project_approval_binding(record)):
+            raise ProjectOnboardingError("project_approval_binding_mismatch")
+        approved = service.approve(project_id)
+    except ProjectOnboardingError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 409
+    return jsonify(status="AUTHORIZED", project_id=approved.project_id), 200
+
+
+@app.post("/control-plane/v3/projects/<project_id>/claim-provisioning")
+def claim_project_provisioning(project_id):
+    """A dedicated provisioning identity may claim one authorized project."""
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    try:
+        record = service.begin_provisioning(project_id)
+    except ProjectOnboardingError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 409
+    return jsonify(status="PROVISIONING", project_id=record.project_id,
+                   owner=record.request.owner, slug=record.request.slug,
+                   description=record.request.description), 200
+
+
+@app.post("/control-plane/v3/projects/<project_id>/complete-provisioning")
+def complete_project_provisioning(project_id):
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    payload = request.get_json(silent=True) or {}
+    try:
+        record = service.complete_provisioning(
+            project_id, payload.get("repository", ""), payload.get("bootstrap_commit", ""),
+            payload.get("github_app_ready") is True,
+        )
+    except ProjectOnboardingError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 409
+    return jsonify(status="READY", project_id=record.project_id, repository=record.repository), 200
 
 
 @app.post("/internal/broker/sweep")
