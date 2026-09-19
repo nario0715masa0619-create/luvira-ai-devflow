@@ -4,7 +4,7 @@
   "provider_id": "github-project-provisioning",
   "service_account": "devflow-project-provisioner@luvira-ai-control-plane.iam.gserviceaccount.com",
   "repository": "nario0715masa0619-create/luvira-ai-devflow",
-  "workflow": "新規プロダクト作成を承認",
+  "workflow": "Authorize project onboarding",
   "environment": "project-provisioning",
   "cloud_run_service": "luvira-devflow-orchestrator",
   "roles": ["roles/run.invoker", "roles/run.viewer"],

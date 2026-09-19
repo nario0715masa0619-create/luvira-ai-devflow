@@ -34,8 +34,8 @@ Webhook secret は一切入れない。
 
 ## 実行承認と専用環境
 
-GitHub Actionsの `新規プロダクト作成を承認` は、通常の `human-approval`
-Environmentで依頼の不変スナップショットを承認する。その後に、別の
+GitHub Actionsの `Authorize project onboarding`（新規プロダクト作成の承認）は、通常の
+`human-approval` Environmentで依頼の不変スナップショットを承認する。その後に、別の
 `project-provisioning` Environmentで、リポジトリ作成だけを許可する。後者には
 `PROJECT_PROVISIONING_TOKEN`（新規作成専用）だけを設定する。通常Workerの認証情報、
 OpenCodeキー、既存プロダクトの公開認証情報を
