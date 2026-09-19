@@ -207,11 +207,33 @@ class ProjectOnboardingService:
             raise ProjectOnboardingError("project_completion_state_invalid")
         if repository != record.request.repository:
             raise ProjectOnboardingError("project_repository_mismatch")
-        if not _COMMIT.fullmatch(bootstrap_commit) or not github_app_ready:
+        if record.repository != repository or not _COMMIT.fullmatch(bootstrap_commit) or bootstrap_commit != record.bootstrap_commit:
+            raise ProjectOnboardingError("project_bootstrap_checkpoint_missing")
+        if not github_app_ready:
             raise ProjectOnboardingError("project_readiness_incomplete")
         return self._save(replace(record, status=ProjectStatus.READY, repository=repository,
                                   bootstrap_commit=bootstrap_commit, github_app_ready=True,
                                   failure_code=None))
+
+    def checkpoint_provisioning(self, project_id: str, repository: str,
+                                bootstrap_commit: str) -> ProjectRecord:
+        """Persist the verified GitHub side effect before App readiness is checked.
+
+        Repository creation and the control-plane callback cannot share a
+        transaction.  This checkpoint turns that gap into an explicit,
+        replay-safe saga boundary: a retry must reproduce the exact approved
+        repository and the exact bootstrap commit, never create another one.
+        """
+        record = self._registry.get(project_id)
+        if record.status is not ProjectStatus.PROVISIONING:
+            raise ProjectOnboardingError("project_checkpoint_state_invalid")
+        if repository != record.request.repository or not _COMMIT.fullmatch(bootstrap_commit):
+            raise ProjectOnboardingError("project_checkpoint_identity_invalid")
+        if record.repository is not None and record.repository != repository:
+            raise ProjectOnboardingError("project_checkpoint_repository_mismatch")
+        if record.bootstrap_commit is not None and record.bootstrap_commit != bootstrap_commit:
+            raise ProjectOnboardingError("project_checkpoint_commit_mismatch")
+        return self._save(replace(record, repository=repository, bootstrap_commit=bootstrap_commit))
 
     def fail_provisioning(self, project_id: str, code: str) -> ProjectRecord:
         record = self._registry.get(project_id)

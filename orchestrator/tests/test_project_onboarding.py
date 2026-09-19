@@ -28,6 +28,7 @@ class ProjectOnboardingTest(unittest.TestCase):
 
         self.service.approve(record.project_id)
         self.service.begin_provisioning(record.project_id)
+        self.service.checkpoint_provisioning(record.project_id, self.request.repository, "a" * 40)
         ready = self.service.complete_provisioning(
             record.project_id, "nario0715masa0619-create/customer-portal", "a" * 40, True,
         )
@@ -38,6 +39,7 @@ class ProjectOnboardingTest(unittest.TestCase):
         record = self.service.request(self.request)
         self.service.approve(record.project_id)
         self.service.begin_provisioning(record.project_id)
+        self.service.checkpoint_provisioning(record.project_id, self.request.repository, "a" * 40)
         with self.assertRaisesRegex(ProjectOnboardingError, "project_repository_mismatch"):
             self.service.complete_provisioning(record.project_id, "owner/other-project", "a" * 40, True)
 
@@ -45,8 +47,28 @@ class ProjectOnboardingTest(unittest.TestCase):
         record = self.service.request(self.request)
         self.service.approve(record.project_id)
         self.service.begin_provisioning(record.project_id)
+        self.service.checkpoint_provisioning(record.project_id, self.request.repository, "a" * 40)
         with self.assertRaisesRegex(ProjectOnboardingError, "project_readiness_incomplete"):
             self.service.complete_provisioning(record.project_id, self.request.repository, "a" * 40, False)
+
+    def test_completion_requires_a_durable_github_checkpoint(self):
+        record = self.service.request(self.request)
+        self.service.approve(record.project_id)
+        self.service.begin_provisioning(record.project_id)
+        with self.assertRaisesRegex(ProjectOnboardingError, "project_bootstrap_checkpoint_missing"):
+            self.service.complete_provisioning(record.project_id, self.request.repository, "a" * 40, True)
+
+    def test_checkpoint_survives_failure_and_recovery_requires_the_same_commit(self):
+        record = self.service.request(self.request)
+        self.service.approve(record.project_id)
+        self.service.begin_provisioning(record.project_id)
+        self.service.checkpoint_provisioning(record.project_id, self.request.repository, "a" * 40)
+        self.service.fail_provisioning(record.project_id, "PROJECT_APP_READINESS_FAILED")
+
+        self.service.approve(record.project_id)
+        self.service.begin_provisioning(record.project_id)
+        with self.assertRaisesRegex(ProjectOnboardingError, "project_checkpoint_commit_mismatch"):
+            self.service.checkpoint_provisioning(record.project_id, self.request.repository, "b" * 40)
 
     def test_invalid_slug_is_rejected_before_any_provisioning(self):
         with self.assertRaisesRegex(ProjectOnboardingError, "project_slug_invalid"):

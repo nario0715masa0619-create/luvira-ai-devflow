@@ -375,6 +375,23 @@ def complete_project_provisioning(project_id):
     return jsonify(status="READY", project_id=record.project_id, repository=record.repository), 200
 
 
+@app.post("/control-plane/v3/projects/<project_id>/checkpoint-provisioning")
+def checkpoint_project_provisioning(project_id):
+    """Durably record a verified GitHub bootstrap result before readiness."""
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    payload = request.get_json(silent=True) or {}
+    try:
+        record = service.checkpoint_provisioning(
+            project_id, payload.get("repository", ""), payload.get("bootstrap_commit", ""),
+        )
+    except ProjectOnboardingError as exc:
+        return jsonify(status="BLOCKED", reason=str(exc)), 409
+    return jsonify(status="PROVISIONING", project_id=record.project_id,
+                   repository=record.repository, bootstrap_commit=record.bootstrap_commit), 200
+
+
 @app.post("/control-plane/v3/projects/<project_id>/fail-provisioning")
 def fail_project_provisioning(project_id):
     """Record a terminal provisioning result without choosing another target."""

@@ -152,6 +152,8 @@ jobs:
           IFS=: read -r status repository bootstrap_commit <<<"$result"
           test "$status" = "PROVISION_READY"
           body="$(jq -n --arg repository "$repository" --arg bootstrap_commit "$bootstrap_commit" '{repository: $repository, bootstrap_commit: $bootstrap_commit, github_app_ready: true}')"
+          checkpoint="$(jq -n --arg repository "$repository" --arg bootstrap_commit "$bootstrap_commit" '{repository: $repository, bootstrap_commit: $bootstrap_commit}')"
+          curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$checkpoint" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/checkpoint-provisioning" >/dev/null
           if ! completed="$(curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$body" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/complete-provisioning")"; then
             failure='{"failure_code":"PROJECT_APP_READINESS_FAILED"}'
             curl --fail --silent --show-error --request POST --header "Authorization: Bearer $ID_TOKEN" --header 'Content-Type: application/json' --data "$failure" "$ORCHESTRATOR_URL/control-plane/v3/projects/$PROJECT_ID/fail-provisioning" >/dev/null
