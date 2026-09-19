@@ -419,6 +419,10 @@ read
             claimed = self.client.post(f"/control-plane/v3/projects/{project_id}/claim-provisioning")
             self.assertEqual(claimed.status_code, 200)
             self.assertEqual(claimed.json["status"], "PROVISIONING")
+            checkpoint = self.client.post(f"/control-plane/v3/projects/{project_id}/checkpoint-provisioning", json={
+                "repository": "nario0715masa0619-create/new-product", "bootstrap_commit": "a" * 40,
+            })
+            self.assertEqual(checkpoint.status_code, 200)
             failed = self.client.post(f"/control-plane/v3/projects/{project_id}/fail-provisioning", json={
                 "failure_code": "GITHUB_APP_NOT_INSTALLED",
             })
@@ -465,6 +469,7 @@ read
             self.client.post(f"/control-plane/v3/projects/{project_id}/authorize", json={"actor": "nario0715masa0619-create", "approval_binding": binding})
             self.client.post(f"/control-plane/v3/projects/{project_id}/claim-provisioning")
             payload = {"repository": "nario0715masa0619-create/new-product", "bootstrap_commit": "a" * 40}
+            self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/checkpoint-provisioning", json=payload).status_code, 200)
             with patch("main.github_project_repository_ready", return_value=False):
                 self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/complete-provisioning", json=payload).status_code, 409)
             with patch("main.github_project_repository_ready", return_value=True):

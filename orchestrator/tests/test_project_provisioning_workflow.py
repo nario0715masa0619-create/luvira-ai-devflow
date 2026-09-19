@@ -20,6 +20,7 @@ class ProjectProvisioningWorkflowTest(unittest.TestCase):
         self.assertIn("providers/github-project-provisioning", workflow)
         self.assertIn("devflow-project-provisioner@luvira-ai-control-plane.iam.gserviceaccount.com", workflow)
         self.assertIn("/claim-provisioning", workflow)
+        self.assertIn("/checkpoint-provisioning", workflow)
         self.assertIn("/complete-provisioning", workflow)
         self.assertIn("/fail-provisioning", workflow)
         self.assertNotIn("GITHUB_APP_PRIVATE_KEY", workflow)

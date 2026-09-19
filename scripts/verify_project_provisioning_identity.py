@@ -33,6 +33,7 @@ def main() -> None:
     require(workflow, f"secrets.{contract['required_secret']}", "dedicated provisioning secret")
     require(workflow, "gcloud run services describe", "canonical Cloud Run endpoint discovery")
     require(workflow, "/claim-provisioning", "provisioning claim")
+    require(workflow, "/checkpoint-provisioning", "durable provisioning checkpoint")
     require(workflow, "/complete-provisioning", "server-owned completion")
     if "github-deployer" in workflow or "devflow-deployer@" in workflow:
         raise SystemExit("project provisioning workflow must not use the deployment identity")
