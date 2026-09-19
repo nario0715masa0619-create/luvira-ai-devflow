@@ -1,4 +1,4 @@
-name: 新規プロダクト作成を承認
+name: Authorize project onboarding
 
 on:
   workflow_dispatch:
