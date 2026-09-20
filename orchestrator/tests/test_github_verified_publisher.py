@@ -14,7 +14,7 @@ class VerifiedPublisherTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "context_mismatch"):
             apply_patch(b"other\n", parse_verified_diff(diff)[0])
 
-    def test_opens_verified_artifacts_ready_for_review(self):
+    def test_opens_verified_artifacts_as_drafts(self):
         calls = []
         publisher = GitHubVerifiedPublisher("a/b", "token")
 
@@ -31,7 +31,7 @@ class VerifiedPublisherTest(unittest.TestCase):
             title="題名", body="本文",
         )
 
-        self.assertFalse(calls[-1][2]["draft"])
+        self.assertTrue(calls[-1][2]["draft"])
 
     def test_rejects_creation_when_the_immutable_base_already_has_the_target(self):
         publisher = GitHubVerifiedPublisher("a/b", "token")
