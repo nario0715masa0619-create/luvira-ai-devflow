@@ -365,14 +365,30 @@ def complete_project_provisioning(project_id):
     try:
         repository = payload.get("repository", "")
         bootstrap_commit = payload.get("bootstrap_commit", "")
-        if not github_project_repository_ready(repository, bootstrap_commit):
-            raise ProjectOnboardingError("project_github_app_or_commit_not_ready")
+        github_project_repository_ready(repository, bootstrap_commit)
         record = service.complete_provisioning(
             project_id, repository, bootstrap_commit, True,
         )
     except ProjectOnboardingError as exc:
         return jsonify(status="BLOCKED", reason=str(exc)), 409
     return jsonify(status="READY", project_id=record.project_id, repository=record.repository), 200
+
+
+@app.get("/readiness/project-provisioning")
+def project_provisioning_readiness():
+    """Prove that the Worker App can cover future private project repositories.
+
+    A selected-repository installation can serve the control repository but
+    cannot automatically receive a repository that the provisioner creates.
+    Treat that as a preflight failure, before any GitHub-side project resource
+    is created.
+    """
+    try:
+        github_project_provisioning_ready()
+    except ProjectOnboardingError as exc:
+        logging.warning("PROJECT_PROVISIONING_BLOCKED reason=%s", exc)
+        return jsonify(status="BLOCKED", reason=str(exc)), 503
+    return jsonify(status="READY", provider="github-project-provisioning"), 200
 
 
 @app.post("/control-plane/v3/projects/<project_id>/checkpoint-provisioning")
@@ -720,16 +736,40 @@ def github_worker_installation_token():
     return token
 
 
-def github_project_repository_ready(repository, bootstrap_commit):
-    """Verify App installation and bootstrap commit without exposing App credentials."""
-    if not isinstance(repository, str) or repository.count("/") != 1:
-        return False
-    if not isinstance(bootstrap_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", bootstrap_commit):
-        return False
+def github_project_provisioning_ready():
+    """Require an App installation that can receive newly-created repositories."""
     app_id = os.environ.get("GITHUB_WORKER_APP_ID", "")
+    installation_id = os.environ.get("GITHUB_WORKER_INSTALLATION_ID", "")
     private_key = os.environ.get("GITHUB_WORKER_PRIVATE_KEY", "")
-    if not app_id or not private_key:
-        return False
+    if not app_id or not installation_id or not private_key:
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_NOT_CONFIGURED")
+    try:
+        configured_installation_id = int(installation_id)
+    except ValueError as exc:
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_IDENTITY_MISMATCH") from exc
+    try:
+        installation = github_worker_installation(app_id, installation_id, private_key)
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise ProjectOnboardingError("PROJECT_GITHUB_APP_AUTHENTICATION_FAILED") from exc
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_INSTALLATION_UNAVAILABLE") from exc
+    except (ValueError, URLError, OSError, jwt.PyJWTError) as exc:
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_INSTALLATION_UNAVAILABLE") from exc
+    if installation.get("id") != configured_installation_id or str(installation.get("app_id", "")) != app_id:
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_IDENTITY_MISMATCH")
+    if installation.get("repository_selection") != "all":
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_ALL_REPOSITORIES_REQUIRED")
+
+
+def github_project_repository_ready(repository, bootstrap_commit):
+    """Verify the App can read the exact private repository and bootstrap commit."""
+    if not isinstance(repository, str) or repository.count("/") != 1:
+        raise ProjectOnboardingError("PROJECT_REPOSITORY_IDENTITY_INVALID")
+    if not isinstance(bootstrap_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", bootstrap_commit):
+        raise ProjectOnboardingError("PROJECT_BOOTSTRAP_COMMIT_INVALID")
+    github_project_provisioning_ready()
+    app_id = os.environ["GITHUB_WORKER_APP_ID"]
+    private_key = os.environ["GITHUB_WORKER_PRIVATE_KEY"]
     try:
         now = int(time.time())
         app_jwt = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": app_id}, private_key, algorithm="RS256")
@@ -744,15 +784,29 @@ def github_project_repository_ready(repository, bootstrap_commit):
         )
         with urlopen(installation_request, timeout=10) as response:  # nosec B310: fixed GitHub HTTPS endpoint
             installation = json.loads(response.read().decode())
-        if not isinstance(installation, dict) or str(installation.get("app_id", "")) != app_id:
-            return False
+    except HTTPError as exc:
+        if exc.code == 404:
+            raise ProjectOnboardingError("PROJECT_GITHUB_APP_NOT_INSTALLED_FOR_REPOSITORY") from exc
+        if exc.code in {401, 403}:
+            raise ProjectOnboardingError("PROJECT_GITHUB_APP_AUTHENTICATION_FAILED") from exc
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_REPOSITORY_PROBE_UNAVAILABLE") from exc
+    except (ValueError, URLError, OSError, jwt.PyJWTError) as exc:
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_REPOSITORY_PROBE_UNAVAILABLE") from exc
+    if not isinstance(installation, dict) or str(installation.get("app_id", "")) != app_id:
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_IDENTITY_MISMATCH")
+    try:
         commit = github_api_request(
             f"{GITHUB_API_URL}/repos/{repository}/git/commits/{bootstrap_commit}",
             token=github_worker_installation_token(),
         )
-    except (ValueError, HTTPError, URLError, OSError):
-        return False
-    return commit.get("sha") == bootstrap_commit
+    except HTTPError as exc:
+        if exc.code in {401, 403, 404}:
+            raise ProjectOnboardingError("PROJECT_GITHUB_APP_COMMIT_READ_DENIED") from exc
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_COMMIT_PROBE_UNAVAILABLE") from exc
+    except (ValueError, URLError, OSError, jwt.PyJWTError) as exc:
+        raise ProjectOnboardingError("PROJECT_GITHUB_APP_COMMIT_PROBE_UNAVAILABLE") from exc
+    if commit.get("sha") != bootstrap_commit:
+        raise ProjectOnboardingError("PROJECT_BOOTSTRAP_COMMIT_NOT_FOUND")
 
 
 def opencode_go_model_count(api_key):

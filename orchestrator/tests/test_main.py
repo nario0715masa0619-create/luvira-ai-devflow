@@ -9,7 +9,7 @@ from unittest.mock import patch
 os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
 import main
 from main import app
-from project_onboarding import InMemoryProjectRegistry, ProjectOnboardingService
+from project_onboarding import InMemoryProjectRegistry, ProjectOnboardingError, ProjectOnboardingService
 
 
 def event(payload):
@@ -470,12 +470,22 @@ read
             self.client.post(f"/control-plane/v3/projects/{project_id}/claim-provisioning")
             payload = {"repository": "nario0715masa0619-create/new-product", "bootstrap_commit": "a" * 40}
             self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/checkpoint-provisioning", json=payload).status_code, 200)
-            with patch("main.github_project_repository_ready", return_value=False):
-                self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/complete-provisioning", json=payload).status_code, 409)
-            with patch("main.github_project_repository_ready", return_value=True):
+            with patch("main.github_project_repository_ready", side_effect=ProjectOnboardingError("PROJECT_GITHUB_APP_NOT_INSTALLED_FOR_REPOSITORY")):
+                blocked = self.client.post(f"/control-plane/v3/projects/{project_id}/complete-provisioning", json=payload)
+                self.assertEqual(blocked.status_code, 409)
+                self.assertEqual(blocked.json["reason"], "PROJECT_GITHUB_APP_NOT_INSTALLED_FOR_REPOSITORY")
+            with patch("main.github_project_repository_ready", return_value=None):
                 self.assertEqual(self.client.post(f"/control-plane/v3/projects/{project_id}/complete-provisioning", json=payload).status_code, 200)
         finally:
             main.PROJECT_ONBOARDING = previous
+
+    def test_project_provisioning_preflight_reports_the_actionable_app_scope(self):
+        with patch("main.github_project_provisioning_ready", side_effect=ProjectOnboardingError("PROJECT_GITHUB_APP_ALL_REPOSITORIES_REQUIRED")):
+            response = self.client.get("/readiness/project-provisioning")
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json, {
+            "status": "BLOCKED", "reason": "PROJECT_GITHUB_APP_ALL_REPOSITORIES_REQUIRED",
+        })
 
     def test_project_onboarding_readiness_requires_a_durable_registry(self):
         previous = main.PROJECT_ONBOARDING
