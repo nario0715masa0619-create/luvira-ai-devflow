@@ -258,13 +258,15 @@ class EventTest(unittest.TestCase):
             "GITHUB_WORKER_INSTALLATION_ID": "158901090",
             "GITHUB_WORKER_PRIVATE_KEY": "test-key",
         }
-        proposal = {"repository": "nario0715masa0619-create/luvira-ai-devflow", "issue": 42, "source_branch": "worker/issue-42-safe-change"}
+        proposal = {"project_id": "project-canary", "repository": "nario0715masa0619-create/devflow-onboarding-canary", "issue": 42, "source_branch": "worker/issue-42-safe-change"}
         evidence = {"head_sha": "abc123", "workflows": {"Context Lock tests": "success", "Orchestrator tests": "success"}}
-        with patch.dict(os.environ, configured), patch("main.github_worker_quality_evidence", return_value=evidence) as lookup:
+        projects = unittest.mock.Mock()
+        projects.require_ready_repository.return_value = proposal["repository"]
+        with patch.dict(os.environ, configured), patch("main.PROJECT_ONBOARDING", projects), patch("main.github_worker_quality_evidence", return_value=evidence) as lookup:
             response = self.client.post("/worker/eligibility", json=proposal)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json, {"status": "ELIGIBLE_FOR_DRAFT_PR", "issue": 42, "head_sha": "abc123"})
-        lookup.assert_called_once_with("4823016", "158901090", "test-key", "worker/issue-42-safe-change")
+        lookup.assert_called_once_with(proposal["repository"], "4823016", "158901090", "test-key", "worker/issue-42-safe-change")
 
     def test_worker_eligibility_blocks_missing_github_workflow(self):
         configured = {
@@ -272,16 +274,21 @@ class EventTest(unittest.TestCase):
             "GITHUB_WORKER_INSTALLATION_ID": "158901090",
             "GITHUB_WORKER_PRIVATE_KEY": "test-key",
         }
-        proposal = {"repository": "nario0715masa0619-create/luvira-ai-devflow", "issue": 42, "source_branch": "worker/issue-42-safe-change"}
+        proposal = {"project_id": "project-canary", "repository": "nario0715masa0619-create/devflow-onboarding-canary", "issue": 42, "source_branch": "worker/issue-42-safe-change"}
         evidence = {"head_sha": "abc123", "workflows": {"Context Lock tests": "success", "Orchestrator tests": "missing"}}
-        with patch.dict(os.environ, configured), patch("main.github_worker_quality_evidence", return_value=evidence):
+        projects = unittest.mock.Mock()
+        projects.require_ready_repository.return_value = proposal["repository"]
+        with patch.dict(os.environ, configured), patch("main.PROJECT_ONBOARDING", projects), patch("main.github_worker_quality_evidence", return_value=evidence):
             response = self.client.post("/worker/eligibility", json=proposal)
         self.assertEqual(response.status_code, 409)
         self.assertEqual(response.json["status"], "PENDING_QUALITY_GATES")
         self.assertEqual(response.json["missing"], ["Orchestrator tests"])
 
     def test_worker_eligibility_blocks_branch_outside_issue_scope(self):
-        response = self.client.post("/worker/eligibility", json={"repository": "nario0715masa0619-create/luvira-ai-devflow", "issue": 42, "source_branch": "main"})
+        projects = unittest.mock.Mock()
+        projects.require_ready_repository.return_value = "nario0715masa0619-create/devflow-onboarding-canary"
+        with patch("main.PROJECT_ONBOARDING", projects):
+            response = self.client.post("/worker/eligibility", json={"project_id": "project-canary", "repository": "nario0715masa0619-create/devflow-onboarding-canary", "issue": 42, "source_branch": "main"})
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json["reason"], "source_branch_not_allowed")
 
@@ -297,7 +304,7 @@ class EventTest(unittest.TestCase):
         task.spec.hash = "abc"
         plane = unittest.mock.Mock()
         plane.register.return_value = task
-        with patch("main.V3_CONTROL_PLANE", plane), patch("main.approval_issue_spec", return_value={"repository": "nario0715masa0619-create/luvira-ai-devflow"}), patch("main.task_spec_hash", return_value="a" * 64), patch("main.github_default_branch_sha", return_value="base"):
+        with patch("main.V3_CONTROL_PLANE", plane), patch("main.PROJECT_ONBOARDING", object()), patch("main.approval_issue_spec", return_value={"repository": "nario0715masa0619-create/devflow-onboarding-canary"}), patch("main.task_spec_hash", return_value="a" * 64), patch("main.github_default_branch_sha", return_value="base"):
             response = self.client.post("/github/webhook", data=raw, content_type="application/json", headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["status"], "AWAITING_HUMAN_APPROVAL")
@@ -306,10 +313,10 @@ class EventTest(unittest.TestCase):
     def approval_issue_payload(self, number):
         body = """### Project ID
 
-devflow
+project-canary
 ### Repository
 
-nario0715masa0619-create/luvira-ai-devflow
+nario0715masa0619-create/devflow-onboarding-canary
 ### 承認すること
 
 Read the repository
@@ -345,8 +352,10 @@ read
 
     def test_approval_issue_form_becomes_control_plane_spec(self):
         payload = self.approval_issue_payload(31)
+        projects = unittest.mock.Mock()
+        projects.require_ready_repository.return_value = "nario0715masa0619-create/devflow-onboarding-canary"
         with patch("main.github_default_branch_sha", return_value="f" * 40):
-            spec = main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 31)
+            spec = main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 31, projects)
 
         self.assertEqual(spec["base_commit"], "f" * 40)
         self.assertEqual(spec["approval_context"]["task_type"], "documentation")
@@ -354,12 +363,15 @@ read
         self.assertEqual(spec["budget"], {"max_cost_usd": 1.0})
         self.assertEqual(spec["execution_scope"]["source_paths"], ["README.md", "docs/"])
         self.assertEqual(spec["approval_context"]["source"]["issue_number"], 31)
+        self.assertEqual(spec["repository"], "nario0715masa0619-create/devflow-onboarding-canary")
 
     def test_approval_issue_form_preserves_an_explicit_implementation_request(self):
         payload = self.approval_issue_payload(33)
         payload["issue"]["body"] = payload["issue"]["body"].replace("\nread\n### 有効期限", "\nimplementation\n### 有効期限")
+        projects = unittest.mock.Mock()
+        projects.require_ready_repository.return_value = "nario0715masa0619-create/devflow-onboarding-canary"
         with patch("main.github_default_branch_sha", return_value="f" * 40):
-            spec = main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 33)
+            spec = main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 33, projects)
 
         self.assertEqual(spec["requested_action"], "implementation")
 
@@ -367,7 +379,14 @@ read
         payload = self.approval_issue_payload(32)
         payload["issue"]["labels"] = []
         with self.assertRaisesRegex(ValueError, "approval_label_required"):
-            main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 32)
+            main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 32, unittest.mock.Mock())
+
+    def test_approval_issue_rejects_a_repository_not_bound_to_the_ready_project(self):
+        payload = self.approval_issue_payload(34)
+        projects = unittest.mock.Mock()
+        projects.require_ready_repository.return_value = "nario0715masa0619-create/another-product"
+        with self.assertRaisesRegex(ValueError, "project_repository_mismatch"):
+            main.approval_issue_spec(payload, "nario0715masa0619-create/luvira-ai-devflow", 34, projects)
 
     def test_blocks_unsigned_github_issue(self):
         response = self.client.post("/github/webhook", json={"action": "opened"}, headers={"X-GitHub-Event": "issues"})

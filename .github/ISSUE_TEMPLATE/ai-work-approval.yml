@@ -18,6 +18,7 @@ body:
     id: repository
     attributes:
       label: Repository
+      description: "実装先の専用プロダクト。Project ID に対応する READY 状態の台帳登録リポジトリだけを指定できます。"
       placeholder: owner/repository
     validations:
       required: true

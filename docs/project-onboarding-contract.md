@@ -57,7 +57,17 @@ OIDCの固定条件と最小権限は
 `security/workload-identity/github-project-provisioning.json` に記録する。契約と
 workflowが食い違うPRは自動検証で停止する。
 
+## 実装受付の分離
+
+実装承認Issueは常に `luvira-ai-devflow` に作成する。これは承認履歴とWebhook入口を
+一箇所に固定するためであり、実装先を同リポジトリに固定する意味ではない。Issue Formの
+`Project ID` と `Repository` は、Control Planeが保持する台帳の `READY` レコードと一致
+しなければ受理しない。受理後のWorker、成果物検証、PR公開はこの確定済みの専用プロダクト
+リポジトリだけを対象にする。任意のリポジトリ名をフォームへ書いて権限を広げることはできない。
+
 ## 既存環境への影響
 
-既存の `luvira-ai-devflow` 固定の実行経路は変更しない。この契約に従う新規プロダクト経路が
-完全に検証・配備されるまで、既存経路は従来どおり fail-closed で動作する。
+承認履歴・Webhook入口・運用通知は既存どおり `luvira-ai-devflow` に固定する。一方で、
+実装先の選択は上記の台帳照合へ移す。台帳が未設定、対象プロダクトが `READY` でない、
+またはフォームのリポジトリ名が一致しない場合は、既存の制御経路を含めて fail-closed で
+停止する。

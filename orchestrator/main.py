@@ -559,8 +559,17 @@ def worker_eligibility():
     proposal = request.get_json(silent=True) or {}
     issue = proposal.get("issue")
     source_branch = proposal.get("source_branch")
-    if proposal.get("repository") != EXPECTED_REPOSITORY or not isinstance(issue, int) or issue < 1:
+    project_id = proposal.get("project_id")
+    repository = proposal.get("repository")
+    if not isinstance(project_id, str) or not isinstance(issue, int) or issue < 1:
         return jsonify(status="BLOCKED", reason="repository_or_issue_mismatch"), 400
+    if PROJECT_ONBOARDING is None:
+        return jsonify(status="BLOCKED", reason="project_onboarding_not_configured"), 503
+    try:
+        if repository != PROJECT_ONBOARDING.require_ready_repository(project_id):
+            raise ProjectOnboardingError("project_repository_mismatch")
+    except ProjectOnboardingError:
+        return jsonify(status="BLOCKED", reason="project_repository_not_ready"), 403
     if not isinstance(source_branch, str) or not source_branch.startswith(f"worker/issue-{issue}-"):
         return jsonify(status="BLOCKED", reason="source_branch_not_allowed"), 400
 
@@ -571,7 +580,7 @@ def worker_eligibility():
         logging.error("GITHUB_WORKER_BLOCKED eligibility credential is not configured")
         return jsonify(status="BLOCKED", reason="github_worker_not_configured"), 503
     try:
-        evidence = github_worker_quality_evidence(app_id, installation_id, private_key, source_branch)
+        evidence = github_worker_quality_evidence(repository, app_id, installation_id, private_key, source_branch)
     except (HTTPError, URLError, TimeoutError, ValueError, jwt.PyJWTError, KeyError):
         logging.warning("GITHUB_WORKER_BLOCKED eligibility lookup failed")
         return jsonify(status="BLOCKED", reason="github_worker_unavailable"), 503
@@ -627,8 +636,11 @@ def register_approval_issue(payload, repository, issue, action):
     if V3_CONTROL_PLANE is None:
         logging.error("V3_CONTROL_PLANE_BLOCKED durable store is not initialized")
         return jsonify(status="BLOCKED", reason="v3_control_plane_not_configured"), 503
+    if PROJECT_ONBOARDING is None:
+        logging.error("V3_CONTROL_PLANE_BLOCKED project registry is not initialized")
+        return jsonify(status="BLOCKED", reason="project_onboarding_not_configured"), 503
     try:
-        spec = approval_issue_spec(payload, repository, issue)
+        spec = approval_issue_spec(payload, repository, issue, PROJECT_ONBOARDING)
         task_id = f"github-issue-{issue}-{task_spec_hash(spec)[:16]}"
         task = V3_CONTROL_PLANE.register(task_id, spec)
     except (V3ControlPlaneError, ValueError) as exc:
@@ -652,8 +664,14 @@ def register_approval_issue(payload, repository, issue, action):
     )
 
 
-def approval_issue_spec(payload, repository, issue_number):
-    """Parse only the fixed Issue Form fields into the control-plane schema."""
+def approval_issue_spec(payload, source_repository, issue_number, projects):
+    """Bind a control-repo Issue to one READY product repository.
+
+    The source Issue remains in the control repository so the human approval
+    history has one canonical home. Its ``Repository`` field is instead the
+    implementation target, accepted only when the durable product registry
+    proves that the matching project is READY.
+    """
     issue = payload.get("issue") or {}
     labels = {item.get("name") for item in issue.get("labels", []) if isinstance(item, dict)}
     if "ai-approval" not in labels:
@@ -666,8 +684,13 @@ def approval_issue_spec(payload, repository, issue_number):
         "最大コスト（USD）", "影響", "しないこと", "許可を求める最初のアクション", "有効期限（UTC）",
         "許可するリポジトリ内パス", "参照を許可するリポジトリ内パス",
     )}
-    if form["Repository"] != repository:
-        raise ValueError("repository_form_mismatch")
+    project_id = form["Project ID"]
+    try:
+        target_repository = projects.require_ready_repository(project_id)
+    except ProjectOnboardingError as exc:
+        raise ValueError("project_repository_not_ready") from exc
+    if form["Repository"] != target_repository:
+        raise ValueError("project_repository_mismatch")
     criteria = [line.strip("- ") for line in form["受入条件"].splitlines() if line.strip()]
     try:
         max_cost_usd = float(form["最大コスト（USD）"])
@@ -681,8 +704,8 @@ def approval_issue_spec(payload, repository, issue_number):
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("invalid_execution_scope") from exc
     return {
-        "repository": repository,
-        "base_commit": github_default_branch_sha(repository),
+        "repository": target_repository,
+        "base_commit": github_default_branch_sha(target_repository),
         "acceptance_criteria": criteria,
         "budget": {"max_cost_usd": max_cost_usd},
         "requested_action": form["許可を求める最初のアクション"],
@@ -690,10 +713,14 @@ def approval_issue_spec(payload, repository, issue_number):
         "expiry": form["有効期限（UTC）"],
         "model_policy": "none" if form["タスク種別"] == "validation" else "low-cost-first:" + ",".join(RUNNER_ORDER),
         "approval_context": {
-            "project_id": form["Project ID"], "task_type": form["タスク種別"],
+            "project_id": project_id, "task_type": form["タスク種別"],
             "approval": form["承認すること"], "impact": form["影響"],
             "excluded": form["しないこと"],
-            "source": {"issue_number": issue_number, "issue_node_id": issue.get("node_id")},
+            "source": {
+                "repository": source_repository,
+                "issue_number": issue_number,
+                "issue_node_id": issue.get("node_id"),
+            },
         },
     }
 
@@ -888,7 +915,7 @@ def create_runtime_incident(checks):
     )
 
 
-def github_worker_quality_evidence(app_id, installation_id, private_key, source_branch):
+def github_worker_quality_evidence(repository, app_id, installation_id, private_key, source_branch):
     """Read only GitHub branch and workflow records; never create a branch, PR, or commit."""
     now = int(time.time())
     app_jwt = jwt.encode({"iat": now - 60, "exp": now + 540, "iss": app_id}, private_key, algorithm="RS256")
@@ -900,14 +927,14 @@ def github_worker_quality_evidence(app_id, installation_id, private_key, source_
     if not isinstance(installation_token, str):
         raise ValueError("invalid GitHub installation token response")
     ref = github_api_request(
-        f"{GITHUB_API_URL}/repos/{EXPECTED_REPOSITORY}/git/ref/heads/{quote(source_branch, safe='')}",
+        f"{GITHUB_API_URL}/repos/{repository}/git/ref/heads/{quote(source_branch, safe='')}",
         token=installation_token,
     )
     head_sha = ((ref.get("object") or {}).get("sha"))
     if not isinstance(head_sha, str):
         raise ValueError("invalid GitHub ref response")
     runs = github_api_request(
-        f"{GITHUB_API_URL}/repos/{EXPECTED_REPOSITORY}/actions/runs?head_sha={quote(head_sha, safe='')}&per_page=100",
+        f"{GITHUB_API_URL}/repos/{repository}/actions/runs?head_sha={quote(head_sha, safe='')}&per_page=100",
         token=installation_token,
     ).get("workflow_runs")
     if not isinstance(runs, list):
