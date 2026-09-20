@@ -100,7 +100,7 @@ class ImplementationExecutionService:
 
                 source_content = source.content if isinstance(source, SourceSnapshot) else source
                 baseline_paths = source.baseline_paths if isinstance(source, SourceSnapshot) else None
-                baseline_files = source.files if isinstance(source, SourceSnapshot) else None
+                baseline_files = source.baseline_files if isinstance(source, SourceSnapshot) else None
                 payload = self._client.generate_artifact(
                     model=self._model, envelope=envelope, source_snapshot=source_content,
                     on_progress=progress,

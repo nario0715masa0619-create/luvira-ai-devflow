@@ -29,6 +29,11 @@ class SourceSnapshot:
     # approved source subset, while the verifier must still know whether a
     # claimed creation already exists at the immutable base.
     baseline_paths: tuple[str, ...]
+    # Complete immutable bytes for files already present in the approved
+    # output scope.  This is intentionally separate from ``files``: a source
+    # reference may be protected and readable (for example a project marker)
+    # without becoming a candidate for output verification.
+    baseline_files: tuple[tuple[str, bytes], ...]
 
 
 def _allowed(path: str, prefixes: tuple[str, ...]) -> bool:
@@ -54,13 +59,10 @@ class SourceSnapshotBuilder:
             if item.get("type") == "blob" and isinstance(path, str) and _allowed(path, allowed_paths):
                 selected.append((path, item.get("sha")))
             if item.get("type") == "blob" and isinstance(path, str) and _allowed(path, output_scope):
-                manifest.append(path)
+                manifest.append((path, item.get("sha")))
         if not selected or len(selected) > MAX_FILES:
             raise SourceSnapshotError("source_snapshot_scope_invalid")
-        chunks = []
-        files = []
-        total = 0
-        for path, sha in sorted(selected):
+        def read_content(sha: str) -> bytes:
             blob = self._read_blob(sha)
             try:
                 # GitHub wraps blob content as Base64 text.  Remove only
@@ -68,18 +70,36 @@ class SourceSnapshotBuilder:
                 encoded = blob["content"]
                 if not isinstance(encoded, str):
                     raise TypeError("blob content must be text")
-                content = base64.b64decode(
+                return base64.b64decode(
                     encoded.encode("ascii").translate(None, b" \t\r\n"), validate=True,
                 )
+            except (KeyError, TypeError, ValueError, UnicodeEncodeError) as exc:
+                raise SourceSnapshotError("source_snapshot_blob_invalid") from exc
+
+        chunks = []
+        files = []
+        total = 0
+        for path, sha in sorted(selected):
+            try:
+                content = read_content(sha)
                 text = content.decode("utf-8")
-            except (KeyError, TypeError, ValueError, UnicodeDecodeError, UnicodeEncodeError) as exc:
+            except UnicodeDecodeError as exc:
                 raise SourceSnapshotError("source_snapshot_blob_invalid") from exc
             total += len(content)
             if total > MAX_SNAPSHOT_BYTES:
                 raise SourceSnapshotError("source_snapshot_too_large")
             chunks.append(f"--- {path}\n{text}\n")
             files.append((path, content))
+        # Deterministic diff construction needs bytes for existing files in
+        # the output scope, but never for read-only references outside it.
+        # Keeping these sets separate prevents a protected source reference
+        # from being mistaken for a write candidate.
+        baseline_files = []
+        for path, sha in sorted(manifest):
+            baseline_files.append((path, read_content(sha)))
         return SourceSnapshot(
             base_commit, "".join(chunks).encode("utf-8"),
-            tuple(path for path, _ in sorted(selected)), tuple(files), tuple(sorted(manifest)),
+            tuple(path for path, _ in sorted(selected)), tuple(files),
+            tuple(path for path, _ in sorted(manifest)),
+            tuple(baseline_files),
         )

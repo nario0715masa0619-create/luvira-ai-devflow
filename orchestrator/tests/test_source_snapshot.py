@@ -28,7 +28,7 @@ class SourceSnapshotTest(unittest.TestCase):
 
         self.assertEqual(snapshot.content, b"--- README.md\nprint(1)\n\n")
 
-    def test_exposes_output_scope_existence_without_reading_its_content(self):
+    def test_reads_output_baseline_separately_from_the_model_source(self):
         reads = []
         builder = SourceSnapshotBuilder(
             lambda _: [
@@ -42,4 +42,20 @@ class SourceSnapshotTest(unittest.TestCase):
 
         self.assertEqual(snapshot.paths, ("docs/input.md",))
         self.assertEqual(snapshot.baseline_paths, ("workflows/existing.json",))
-        self.assertEqual(reads, ["input"])
+        self.assertEqual(snapshot.files, (("docs/input.md", b"input\n"),))
+        self.assertEqual(snapshot.baseline_files, (("workflows/existing.json", b"input\n"),))
+        self.assertEqual(reads, ["input", "output"])
+
+    def test_protected_read_only_source_never_becomes_an_output_baseline(self):
+        builder = SourceSnapshotBuilder(
+            lambda _: [
+                {"type": "blob", "path": ".github/luvira-project.json", "sha": "marker"},
+            ],
+            lambda _: {"content": base64.b64encode(b"{}\n").decode()},
+        )
+
+        snapshot = builder.build("a" * 40, (".github/luvira-project.json",), ("canary/",))
+
+        self.assertEqual(snapshot.paths, (".github/luvira-project.json",))
+        self.assertEqual(snapshot.baseline_paths, ())
+        self.assertEqual(snapshot.baseline_files, ())
