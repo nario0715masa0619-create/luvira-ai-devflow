@@ -163,7 +163,11 @@ class GitHubVerifiedPublisher:
                         raise VerifiedPublicationError("publication_base_content_missing") from exc
                     raise
                 try:
-                    source = base64.b64decode(current["content"], validate=True); sha = current["sha"]
+                    # GitHub wraps Base64 content at line boundaries.  Strip
+                    # that transport whitespace before strict validation so a
+                    # valid immutable base cannot be mistaken for corruption.
+                    encoded = "".join(str(current["content"]).split())
+                    source = base64.b64decode(encoded, validate=True); sha = current["sha"]
                 except (KeyError, TypeError, ValueError) as exc:
                     raise VerifiedPublicationError("publication_base_content_invalid") from exc
             else:

@@ -1,3 +1,4 @@
+import base64
 import unittest
 
 from github_verified_publisher import GitHubVerifiedPublisher, VerifiedPublicationError, apply_patch, parse_verified_diff
@@ -43,6 +44,27 @@ class VerifiedPublisherTest(unittest.TestCase):
                 diff=b"--- /dev/null\n+++ b/src/new.py\n@@ -0,0 +1 @@\n+created\n",
                 title="題名", body="本文",
             )
+
+    def test_accepts_github_base64_content_with_line_wraps(self):
+        calls = []
+        publisher = GitHubVerifiedPublisher("a/b", "token")
+        wrapped = base64.encodebytes(b"before\n").decode("ascii")
+
+        def call(method, path, body=None):
+            calls.append((method, path, body))
+            if method == "GET" and "/contents/" in path:
+                return {"content": wrapped, "sha": "base-sha"}
+            return {"html_url": "https://example.test/pr/1"} if path.endswith("/pulls") else {}
+
+        publisher._call = call
+        publisher.publish(
+            task_id="task", execution_id="execution", base_commit="a" * 40,
+            diff=b"--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-before\n+after\n",
+            title="題名", body="本文",
+        )
+
+        write = next(body for method, path, body in calls if method == "PUT" and "/contents/" in path)
+        self.assertEqual(base64.b64decode(write["content"]), b"after\n")
 
     def test_returns_none_when_the_deterministic_branch_has_no_pr_yet(self):
         publisher = GitHubVerifiedPublisher("a/b", "token")
