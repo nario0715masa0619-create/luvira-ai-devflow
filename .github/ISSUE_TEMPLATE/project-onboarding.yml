@@ -1,0 +1,32 @@
+name: Project onboarding
+description: Orcaから新規プロダクトを作成する前の人間向け承認依頼
+title: "[Project Onboarding]: "
+labels: ["project-onboarding"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        このIssueは新規の非公開リポジトリ作成だけを承認するものです。実装、Worker実行、PR作成は含みません。
+  - type: input
+    id: owner
+    attributes:
+      label: Project Owner
+      description: GitHubの所有者。現在は個人または組織の名前をそのまま指定します。
+      placeholder: nario0715masa0619-create
+    validations:
+      required: true
+  - type: input
+    id: slug
+    attributes:
+      label: Project Slug
+      description: 小文字・数字・ハイフンで指定する新規リポジトリ名です。
+      placeholder: my-new-product
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: プロダクト概要
+      description: 作る製品の目的を簡潔に記載します。秘密情報は書かないでください。
+    validations:
+      required: true

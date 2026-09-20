@@ -633,6 +633,20 @@ def register_approval_issue(payload, repository, issue, action):
     This is intentionally the final operation of webhook intake.  It does not
     select a model, enqueue a worker, create a branch, or call an AI provider.
     """
+    labels = {
+        item.get("name")
+        for item in (payload.get("issue") or {}).get("labels", [])
+        if isinstance(item, dict)
+    }
+    # Product provisioning is deliberately not an implementation task.  It
+    # must be accepted before the normal Issue Form parser tries to resolve a
+    # repository that does not exist yet.
+    if "project-onboarding" in labels:
+        if "ai-approval" in labels:
+            logging.warning("PROJECT_ONBOARDING_BLOCKED issue=%s mixed labels", issue)
+            return jsonify(status="BLOCKED", reason="project_onboarding_label_conflict"), 400
+        return register_project_onboarding_issue(payload, issue, action)
+
     if V3_CONTROL_PLANE is None:
         logging.error("V3_CONTROL_PLANE_BLOCKED durable store is not initialized")
         return jsonify(status="BLOCKED", reason="v3_control_plane_not_configured"), 503
@@ -661,6 +675,54 @@ def register_approval_issue(payload, repository, issue, action):
         spec_hash=task.spec.hash,
         approval_binding=task.approval_binding,
         issue=issue,
+    )
+
+
+def register_project_onboarding_issue(payload, issue_number, action):
+    """Register a signed Orca-originated product request without creating a repo.
+
+    The control-repository Issue is audit evidence only.  The dedicated
+    project-provisioning workflow remains the sole creator of GitHub
+    repositories after its separate human approval.
+    """
+    service, blocked = project_service_or_blocked()
+    if blocked:
+        return blocked
+    issue = payload.get("issue") or {}
+    body = issue.get("body")
+    if not isinstance(body, str):
+        return jsonify(status="BLOCKED", reason="project_onboarding_form_body_required"), 400
+    try:
+        request_value = NewProjectRequest(
+            owner=issue_form_value(body, "Project Owner"),
+            slug=issue_form_value(body, "Project Slug"),
+            description=issue_form_value(body, "プロダクト概要"),
+        )
+        try:
+            record = service.request(request_value)
+        except ProjectOnboardingError as exc:
+            # GitHub can deliver both `opened` and `labeled` for one freshly
+            # created Issue.  Treat the same immutable request as idempotent;
+            # never create a second product record or silently alter it.
+            if str(exc) != "project_already_requested":
+                raise
+            record = service.get(f"project-{request_value.slug}")
+            if record.request != request_value:
+                raise ProjectOnboardingError("project_request_conflict") from exc
+    except ProjectOnboardingError as exc:
+        logging.warning(
+            "PROJECT_ONBOARDING_BLOCKED issue=%s action=%s reason=%s",
+            issue_number,
+            action,
+            str(exc),
+        )
+        return jsonify(status="BLOCKED", reason="invalid_project_onboarding_issue"), 400
+
+    return jsonify(
+        status="AWAITING_HUMAN_APPROVAL",
+        project_id=record.project_id,
+        approval_binding=project_approval_binding(record),
+        issue=issue_number,
     )
 
 
