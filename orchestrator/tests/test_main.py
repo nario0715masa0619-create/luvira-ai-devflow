@@ -310,6 +310,65 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.json["status"], "AWAITING_HUMAN_APPROVAL")
         self.assertEqual(response.json["task_id"], "task-26")
 
+    def test_signed_project_onboarding_issue_registers_a_project_without_a_worker(self):
+        payload = self.project_onboarding_issue_payload(52)
+        raw = json.dumps(payload).encode()
+        signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
+        previous = main.PROJECT_ONBOARDING
+        main.PROJECT_ONBOARDING = ProjectOnboardingService(InMemoryProjectRegistry())
+        try:
+            response = self.client.post(
+                "/github/webhook", data=raw, content_type="application/json",
+                headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature},
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.json["status"], "AWAITING_HUMAN_APPROVAL")
+            self.assertEqual(response.json["project_id"], "project-orca-e2e-sample")
+            self.assertEqual(main.PROJECT_ONBOARDING.get("project-orca-e2e-sample").status.value, "REQUESTED")
+        finally:
+            main.PROJECT_ONBOARDING = previous
+
+    def test_project_onboarding_issue_is_idempotent_for_github_opened_and_labeled_events(self):
+        payload = self.project_onboarding_issue_payload(53)
+        raw = json.dumps(payload).encode()
+        signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
+        previous = main.PROJECT_ONBOARDING
+        main.PROJECT_ONBOARDING = ProjectOnboardingService(InMemoryProjectRegistry())
+        try:
+            first = self.client.post(
+                "/github/webhook", data=raw, content_type="application/json",
+                headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature},
+            )
+            payload["action"] = "labeled"
+            raw = json.dumps(payload).encode()
+            signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
+            repeated = self.client.post(
+                "/github/webhook", data=raw, content_type="application/json",
+                headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature},
+            )
+            self.assertEqual(first.status_code, 200)
+            self.assertEqual(repeated.status_code, 200)
+            self.assertEqual(repeated.json["project_id"], "project-orca-e2e-sample")
+        finally:
+            main.PROJECT_ONBOARDING = previous
+
+    def test_project_onboarding_rejects_an_implementation_label_mix(self):
+        payload = self.project_onboarding_issue_payload(54)
+        payload["issue"]["labels"].append({"name": "ai-approval"})
+        raw = json.dumps(payload).encode()
+        signature = "sha256=" + hmac.new(b"test-secret", raw, hashlib.sha256).hexdigest()
+        previous = main.PROJECT_ONBOARDING
+        main.PROJECT_ONBOARDING = ProjectOnboardingService(InMemoryProjectRegistry())
+        try:
+            response = self.client.post(
+                "/github/webhook", data=raw, content_type="application/json",
+                headers={"X-GitHub-Event": "issues", "X-Hub-Signature-256": signature},
+            )
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.json["reason"], "project_onboarding_label_conflict")
+        finally:
+            main.PROJECT_ONBOARDING = previous
+
     def approval_issue_payload(self, number):
         body = """### Project ID
 
@@ -349,6 +408,26 @@ read
 2026-12-31T00:00:00Z
 """
         return {"action": "opened", "repository": {"full_name": "nario0715masa0619-create/luvira-ai-devflow"}, "issue": {"number": number, "node_id": "issue-node", "labels": [{"name": "ai-approval"}], "body": body}}
+
+    def project_onboarding_issue_payload(self, number):
+        body = (
+            "### Project Owner\n\n"
+            "nario0715masa0619-create\n"
+            "### Project Slug\n\n"
+            "orca-e2e-sample\n"
+            "### プロダクト概要\n\n"
+            "Orca受付から新規プロダクトを安全に作成する検証用CLI\n"
+        )
+        return {
+            "action": "opened",
+            "repository": {"full_name": "nario0715masa0619-create/luvira-ai-devflow"},
+            "issue": {
+                "number": number,
+                "node_id": "project-issue-node",
+                "labels": [{"name": "project-onboarding"}],
+                "body": body,
+            },
+        }
 
     def test_approval_issue_form_becomes_control_plane_spec(self):
         payload = self.approval_issue_payload(31)
