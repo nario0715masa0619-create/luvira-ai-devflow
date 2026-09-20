@@ -12,7 +12,7 @@ Cloud Run上でGitHubイベントを受け、対象リポジトリとIssueをfai
 6. `/readiness/opencode-go` は、Secret Managerから実行中だけ渡されるキーでOpenCode Goのモデル一覧に接続する。キー、モデル名、プロンプトは応答・ログへ出さず、接続可否と件数だけを返す。コード生成は行わない。
 7. `/readiness/github-worker` は、Secret Managerから実行中だけ渡されるWorker App鍵でGitHubのインストールID、運用Issue作成権限、短期トークンによる対象リポジトリの読取りを検証する。トークンは発行するが、ブランチ作成、PR作成、Issue作成、コード変更は行わない。
 8. `/readiness/project-provisioning` は、新規の非公開リポジトリを自動作成できる前提として、Worker Appの導入範囲が「すべてのリポジトリ」であることを作成前に検証する。選択したリポジトリだけの導入では、制御リポジトリは正常でも新規プロダクトを自動でApp管理下へ置けないため、理由を明示して作成前に停止する。
-8. `/worker/eligibility` は、将来Workerが書込みを行う前の読取り専用ゲートである。自己申告の結果を受け取らず、GitHub上のブランチ先端SHAと必須CIワークフローの成功記録を直接照合する。結果が欠ける場合は fail-closed で停止する。
+8. `/worker/eligibility` は、将来Workerが書込みを行う前の読取り専用ゲートである。台帳で `READY` を確認した専用プロダクトだけを対象にし、GitHub上のブランチ先端SHAと必須CIワークフローの成功記録を直接照合する。結果が欠ける場合は fail-closed で停止する。
 9. GitHub Webhook は専用の公開入口サービスだけで受信する。この入口は `/github/webhook` 以外を404で拒否し、署名を検証したイベントだけをCloud Run IDトークン付きで非公開オーケストレーターへ中継する。公開入口にはWorker鍵・OpenCodeキーを渡さない。
 10. 人間承認後は、同じ不変スナップショットをv3タスクとしてFirestoreへ投影し、Cloud Runジョブ・Broker IAM・成果物境界・OpenCode Go到達性の読取り検証を全て通過した場合のみ `EXECUTION_QUEUED` として記録する。この段階ではWorkerを起動しない。
 
