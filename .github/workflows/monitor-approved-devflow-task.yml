@@ -72,5 +72,7 @@ jobs:
               jq --raw-output '"- Current status: `" + .status + "`\n- Task: `" + .task_id + "`\n- No write, retry, or cancellation was performed."' <<<"$response" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
-            sleep 15
+            # Requester updates are intentionally sparse: this is a status
+            # observer, not a live log stream.
+            sleep 120
           done

@@ -59,6 +59,7 @@ OPENCODE_IMPLEMENTATION_MODEL = os.environ.get("OPENCODE_IMPLEMENTATION_MODEL", 
 # The protected human-approval workflow is the sole external trigger for the
 # Broker.  It already has Cloud Run Invoker and an immutable approval binding.
 BOOTSTRAP_CALLER_EMAIL = os.environ.get("BOOTSTRAP_CALLER_EMAIL", "devflow-human-approval@luvira-ai-control-plane.iam.gserviceaccount.com")
+MAX_SAFE_EXECUTION_ATTEMPTS = 3
 
 
 # v3 queue wiring is supplied only by the private runtime composition.  An
@@ -294,18 +295,58 @@ def approval_issue_status(issue_number):
         return jsonify(status="BLOCKED", reason="v3_task_status_unavailable"), 503
 
     execution = task.execution
+    checkpoint, recovery_action = requester_recovery_checkpoint(task)
     return jsonify(
         status=task.status.value,
         task_id=task.task_id,
         execution_status=execution.status.value if execution else None,
         failure_code=execution.failure_code if execution else None,
         publication_url=execution.publication_url if execution else None,
+        checkpoint=checkpoint,
+        recovery_action=recovery_action,
         terminal=task.status in {
             V3Status.NO_CHANGE_DETECTED, V3Status.EXECUTION_FAILED_FINAL,
             V3Status.PUBLISHED, V3Status.MERGED, V3Status.REJECTED,
             V3Status.CANCELLED, V3Status.EXPIRED,
         },
     ), 200
+
+
+def requester_recovery_checkpoint(task):
+    """Describe the durable resume boundary without exposing task inputs.
+
+    The Broker owns all transitions; this projection is for the requester and
+    monitor only.  It makes clear whether a restart will reconcile existing
+    work, safely resume from a checkpoint, or require a new approval.
+    """
+    status = task.status
+    record = task.execution
+    if status in {V3Status.EXECUTION_RUNNING, V3Status.WORKER_LAUNCH_ACCEPTED,
+                  V3Status.WORKER_EXECUTION_IDENTIFIED}:
+        return "WORKER_EXECUTION", "RECONCILE_EXISTING_WORKER"
+    if status is V3Status.EXECUTION_FAILED_RETRYABLE:
+        if record is not None and record.attempt >= MAX_SAFE_EXECUTION_ATTEMPTS:
+            return "WORKER_EXECUTION", "TERMINALIZE_RECOVERY_BUDGET"
+        return "WORKER_DISPATCH", "RESUME_SAFE_WORKER_RETRY"
+    if status is V3Status.WORKER_HEALTH_VERIFIED:
+        return "WORKER_HEALTH", "RESUME_IMPLEMENTATION"
+    if status is V3Status.IMPLEMENTATION_GENERATING:
+        return "IMPLEMENTATION_CLAIM", "RECONCILE_PROVIDER_CLAIM_NO_REPLAY"
+    if status is V3Status.ARTIFACT_VERIFIED:
+        return "VERIFIED_ARTIFACT", "RESUME_DRAFT_PR_PUBLICATION"
+    if status is V3Status.PUBLISHED:
+        return "DRAFT_PR", "AWAIT_HUMAN_MERGE"
+    if status is V3Status.AWAITING_HUMAN_APPROVAL:
+        return "APPROVAL", "AWAIT_HUMAN_DECISION"
+    if status is V3Status.AUTHORIZED:
+        return "AUTHORIZATION", "RESUME_QUEUE_ADMISSION"
+    if status in {V3Status.EXECUTION_FAILED_FINAL, V3Status.EXPIRED,
+                  V3Status.REJECTED, V3Status.CANCELLED}:
+        return "TERMINAL", "NEW_APPROVAL_REQUIRED"
+    if status in {V3Status.NO_CHANGE_DETECTED, V3Status.VALIDATION_SUCCEEDED,
+                  V3Status.MERGED}:
+        return "TERMINAL", "NONE"
+    return "UNKNOWN", "RECONCILE_STATE"
 
 
 def project_approval_binding(record):

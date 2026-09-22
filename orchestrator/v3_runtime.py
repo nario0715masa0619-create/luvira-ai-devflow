@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+import os
 
 from google.cloud import firestore
 from google.cloud import run_v2
@@ -121,6 +122,7 @@ def create_v3_queue_service(
         tasks,
         preflight,
         transaction,
+        max_safe_attempts=int(os.environ.get("MAX_SAFE_EXECUTION_ATTEMPTS", "3")),
     )
     worker = CloudRunBootstrapClient(project, region, worker_job)
     dispatcher = WorkerDispatchService(tasks, transaction, worker)

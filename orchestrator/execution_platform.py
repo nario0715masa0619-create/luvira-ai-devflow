@@ -313,6 +313,25 @@ class ExecutionPlatform:
         return task
 
     @staticmethod
+    def exhaust_retry_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Close a retryable attempt after its bounded safe-recovery budget.
+
+        A retryable result is not permission for an unbounded Scheduler loop.
+        The immutable task remains available for diagnosis, but another
+        execution requires a newly approved request instead of silently
+        spending or launching forever.
+        """
+        if task.status is not V3Status.EXECUTION_FAILED_RETRYABLE:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        task.execution.failure_code = "SAFE_RECOVERY_ATTEMPTS_EXHAUSTED_FINAL"
+        task.execution.status = V3Status.EXECUTION_FAILED_FINAL
+        task.status = V3Status.EXECUTION_FAILED_FINAL
+        task.audit.append("SAFE_RECOVERY_ATTEMPTS_EXHAUSTED_FINAL")
+        return task
+
+    @staticmethod
     def verify_worker_health_existing(task: V3Task, execution_id: str) -> V3Task:
         """Record the credential-free Worker health proof, not an AI result."""
         if task.status is not V3Status.WORKER_EXECUTION_IDENTIFIED:

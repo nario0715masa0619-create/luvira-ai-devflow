@@ -190,6 +190,32 @@ class V3Transaction:
         self._run_transaction(write)
         task.revision += 1
 
+    def record_retry_exhausted(self, task: V3Task, record: ExecutionRecord) -> None:
+        """Persist a terminal retry budget decision for the same execution."""
+        if (task.status is not V3Status.EXECUTION_FAILED_FINAL or task.execution is not record
+                or record.status is not V3Status.EXECUTION_FAILED_FINAL
+                or record.failure_code != "SAFE_RECOVERY_ATTEMPTS_EXHAUSTED_FINAL"):
+            raise V3TransactionError("retry_exhaustion_invalid")
+        task_ref = self.tasks.document(task.task_id)
+
+        def write(transaction: Any) -> None:
+            snapshot = task_ref.get(transaction=transaction)
+            if not snapshot.exists:
+                raise V3TransactionError("v3_task_not_found")
+            stored = task_from_payload(snapshot.to_dict())
+            if (stored.status is not V3Status.EXECUTION_FAILED_RETRYABLE
+                    or stored.execution is None
+                    or stored.execution.execution_id != record.execution_id
+                    or stored.execution.status is not V3Status.EXECUTION_FAILED_RETRYABLE
+                    or stored.revision != task.revision):
+                raise V3TransactionError("retry_exhaustion_not_recordable")
+            payload = task_payload(task)
+            payload["revision"] = task.revision + 1
+            transaction.update(task_ref, payload)
+
+        self._run_transaction(write)
+        task.revision += 1
+
     def claim_implementation(self, task: V3Task, record: ExecutionRecord) -> None:
         """Persist the provider-spend claim before the Broker calls OpenCode."""
         if task.status is not V3Status.IMPLEMENTATION_GENERATING or task.execution is not record:

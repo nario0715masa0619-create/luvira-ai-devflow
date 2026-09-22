@@ -153,6 +153,7 @@ class EventTest(unittest.TestCase):
             "status": "PUBLISHED", "task_id": task.task_id,
             "execution_status": "PUBLISHED", "failure_code": None,
             "publication_url": "https://github.com/example/product/pull/42",
+            "checkpoint": "DRAFT_PR", "recovery_action": "AWAIT_HUMAN_MERGE",
             "terminal": True,
         })
         store.task_for_issue.assert_called_once_with(26)
@@ -165,6 +166,22 @@ class EventTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json, {"status": "BLOCKED", "reason": "task_not_found"})
+
+    def test_status_projects_safe_retry_checkpoint_without_task_input(self):
+        execution = unittest.mock.Mock(
+            status=V3Status.EXECUTION_FAILED_RETRYABLE, attempt=1,
+            failure_code="WORKER_EXECUTION_RETRYABLE", publication_url=None,
+        )
+        task = unittest.mock.Mock(task_id="github-issue-26-aaaaaaaaaaaaaaaa",
+                                  status=V3Status.EXECUTION_FAILED_RETRYABLE, execution=execution)
+        store = unittest.mock.Mock()
+        store.task_for_issue.return_value = task
+        with patch("main.V3_TASK_STORE", store):
+            response = self.client.get("/control-plane/v3/approval-issues/26/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json["checkpoint"], "WORKER_DISPATCH")
+        self.assertEqual(response.json["recovery_action"], "RESUME_SAFE_WORKER_RETRY")
 
     def test_private_authorization_rejects_unsafe_actor(self):
         response = self.client.post(

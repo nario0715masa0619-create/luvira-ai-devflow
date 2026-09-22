@@ -92,6 +92,27 @@ class V3TransactionTest(unittest.TestCase):
 
         self.transaction.update.assert_not_called()
 
+    def test_records_retry_exhaustion_only_from_the_same_retryable_execution(self):
+        stored = V3Task("task", self.spec, V3Status.EXECUTION_FAILED_RETRYABLE)
+        stored.execution = ExecutionRecord(
+            "third-execution", "task", self.spec.hash, 3,
+            V3Status.EXECUTION_FAILED_RETRYABLE, failure_code="WORKER_EXECUTION_RETRYABLE",
+        )
+        terminal = V3Task("task", self.spec, V3Status.EXECUTION_FAILED_FINAL)
+        terminal.audit = ["SAFE_RECOVERY_ATTEMPTS_EXHAUSTED_FINAL"]
+        terminal.execution = ExecutionRecord(
+            "third-execution", "task", self.spec.hash, 3,
+            V3Status.EXECUTION_FAILED_FINAL, failure_code="SAFE_RECOVERY_ATTEMPTS_EXHAUSTED_FINAL",
+        )
+        task_snapshot = Mock(exists=True)
+        task_snapshot.to_dict.return_value = task_payload(stored)
+        self.task_ref.get.return_value = task_snapshot
+
+        V3Transaction(self.client).record_retry_exhausted(terminal, terminal.execution)
+
+        self.transaction.update.assert_called_once()
+        self.assertEqual(terminal.revision, 2)
+
     def test_claims_queued_execution_once_before_external_launch(self):
         stored = self.queued
         task_snapshot = Mock(exists=True)

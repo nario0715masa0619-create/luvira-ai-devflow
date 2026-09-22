@@ -36,6 +36,18 @@ class ExecutionPlatformTest(unittest.TestCase):
         self.assertNotEqual(first.execution_id, second.execution_id)
         self.assertEqual(task.status, V3Status.EXECUTION_QUEUED)
 
+    def test_exhausted_safe_recovery_becomes_terminal_with_a_stable_code(self):
+        platform, task = self.authorized()
+        execution = platform.queue(task.task_id, [True])
+        platform.begin(task.task_id, execution.execution_id)
+        platform.fail(task.task_id, execution.execution_id, 429)
+
+        ExecutionPlatform.exhaust_retry_existing(task, execution.execution_id)
+
+        self.assertEqual(task.status, V3Status.EXECUTION_FAILED_FINAL)
+        self.assertEqual(task.execution.failure_code, "SAFE_RECOVERY_ATTEMPTS_EXHAUSTED_FINAL")
+        self.assertIn("SAFE_RECOVERY_ATTEMPTS_EXHAUSTED_FINAL", task.audit)
+
     def test_preflight_failure_does_not_start_or_consume_authorization(self):
         platform, task = self.authorized()
         with self.assertRaisesRegex(PreflightRejected, "execution_preflight_failed"):
