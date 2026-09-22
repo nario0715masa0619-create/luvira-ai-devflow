@@ -1,0 +1,36 @@
+{
+  "name": "Orca Product DevFlow Intake v1",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "orca-product-devflow-intake-v1", "responseMode": "responseNode", "authentication": "headerAuth", "options": {}},
+      "id": "orca-product-webhook", "name": "Webhook - Orca Product Intake", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [200, 300], "webhookId": "orca-product-devflow-intake-v1"
+    },
+    {
+      "parameters": {"jsCode": "const input = $input.first().json;\nconst payload = input.body && typeof input.body === 'object' ? input.body : input;\nconst controlRepository = 'nario0715masa0619-create/luvira-ai-devflow';\nconst projectId = typeof payload.project_id === 'string' ? payload.project_id.trim() : '';\nconst repository = typeof payload.repository === 'string' ? payload.repository.trim() : '';\nif (!/^project-[a-z][a-z0-9-]{2,62}$/.test(projectId)) throw new Error('ORCA_PRODUCT_PROJECT_ID_INVALID');\nif (!/^[A-Za-z0-9_.-]+\\/[A-Za-z0-9_.-]+$/.test(repository) || repository === controlRepository || repository === 'nario0715masa0619-create/luvira-ai-devflow-staging') throw new Error('ORCA_PRODUCT_REPOSITORY_INVALID');\nfor (const key of ['request', 'task_type', 'requested_action', 'expiry']) { if (typeof payload[key] !== 'string' || !payload[key].trim()) throw new Error(`ORCA_PRODUCT_${key.toUpperCase()}_INVALID`); }\nif (!Array.isArray(payload.allowed_paths) || !payload.allowed_paths.length || !Array.isArray(payload.source_paths) || !payload.source_paths.length || !Array.isArray(payload.acceptance_criteria) || !payload.acceptance_criteria.length || !Number.isFinite(payload.max_cost_usd) || payload.max_cost_usd <= 0) throw new Error('ORCA_PRODUCT_SCOPE_INVALID');\nconst pathInvalid = value => typeof value !== 'string' || !value || value.startsWith('/') || value.includes('\\\\') || value.split('/').includes('..');\nif ([...payload.allowed_paths, ...payload.source_paths].some(pathInvalid)) throw new Error('ORCA_PRODUCT_SCOPE_INVALID');\nif (!['implementation', 'documentation', 'test', 'validation'].includes(payload.task_type) || !['read', 'plan', 'comment', 'implementation'].includes(payload.requested_action)) throw new Error('ORCA_PRODUCT_ACTION_INVALID');\nconst criteria = payload.acceptance_criteria.map(value => `- ${String(value).trim()}`).join('\\n');\nconst allowed = JSON.stringify([...new Set(payload.allowed_paths)].sort());\nconst source = JSON.stringify([...new Set(payload.source_paths)].sort());\nconst impact = `対象リポジトリ: ${repository}\\n変更許可: ${allowed}\\n参照許可: ${source}\\n最大コスト: $${payload.max_cost_usd}`;\nconst body = `### Project ID\\n\\n${projectId}\\n\\n### Repository\\n\\n${repository}\\n\\n### 承認すること\\n\\n${payload.request.trim()}\\n\\n### タスク種別\\n\\n${payload.task_type}\\n\\n### 受入条件\\n\\n${criteria}\\n\\n### 最大コスト（USD）\\n\\n${payload.max_cost_usd}\\n\\n### 影響\\n\\n${impact}\\n\\n### しないこと\\n\\n許可パス外の変更、秘密情報・権限・本番環境の変更、承認前の実装実行\\n\\n### 許可するリポジトリ内パス\\n\\n${allowed}\\n\\n### 参照を許可するリポジトリ内パス\\n\\n${source}\\n\\n### 許可を求める最初のアクション\\n\\n${payload.requested_action}\\n\\n### 有効期限（UTC）\\n\\n${payload.expiry}`;\nreturn [{ json: { control_repository: controlRepository, title: `[AI Approval]: ${payload.request.trim().slice(0, 70)}`, issue_body: body } }];"},
+      "id": "validate-product-intake", "name": "Validate Ready Product Approval Issue", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 300]
+    },
+    {
+      "parameters": {"method": "POST", "url": "=https://api.github.com/repos/{{ $json.control_repository }}/issues", "authentication": "genericCredentialType", "genericAuthType": "httpHeaderAuth", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "Accept", "value": "application/vnd.github+json"}, {"name": "Content-Type", "value": "application/json"}]}, "sendBody": true, "specifyBody": "json", "jsonBody": "={{ { title: $json.title, body: $json.issue_body, labels: ['ai-approval'] } }}", "options": {}},
+      "id": "create-product-approval-issue", "name": "Create Control Approval Issue", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [680, 300]
+    },
+    {
+      "parameters": {"jsCode": "const issue = $input.first().json;\nif (!Number.isInteger(issue.number) || typeof issue.html_url !== 'string') throw new Error('ORCA_PRODUCT_ISSUE_CREATE_INVALID');\nreturn [{ json: { status: 'AWAITING_HUMAN_APPROVAL', issue_number: issue.number, issue_url: issue.html_url } }];"},
+      "id": "product-intake-result", "name": "Build Product Intake Result", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [920, 300]
+    },
+    {
+      "parameters": {"respondWith": "json", "responseBody": "={{ $json }}", "options": {}},
+      "id": "respond-product-orca", "name": "Respond to Orca", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1160, 300]
+    }
+  ],
+  "connections": {
+    "Webhook - Orca Product Intake": {"main": [[{"node": "Validate Ready Product Approval Issue", "type": "main", "index": 0}]]},
+    "Validate Ready Product Approval Issue": {"main": [[{"node": "Create Control Approval Issue", "type": "main", "index": 0}]]},
+    "Create Control Approval Issue": {"main": [[{"node": "Build Product Intake Result", "type": "main", "index": 0}]]},
+    "Build Product Intake Result": {"main": [[{"node": "Respond to Orca", "type": "main", "index": 0}] ]}
+  },
+  "active": false,
+  "settings": {"executionOrder": "v1"},
+  "versionId": "orca-product-devflow-intake-v1-cloud",
+  "meta": {"templateCredsSetupCompleted": false},
+  "tags": []
+}
