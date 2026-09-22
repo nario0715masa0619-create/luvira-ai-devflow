@@ -22,6 +22,7 @@ from worker_dispatch_service import WorkerDispatchService
 from worker_result_reconciler import WorkerResultReconciler
 from github_readonly_source import GitHubReadOnlySource
 from implementation_execution_service import ImplementationExecutionService
+from implementation_claim_recovery_service import ImplementationClaimRecoveryService
 from opencode_implementation_client import OpenCodeImplementationClient
 from github_verified_publisher import GitHubVerifiedPublisher
 from verified_publication_service import VerifiedPublicationService
@@ -36,6 +37,7 @@ class V3QueueRuntime:
     dispatcher: WorkerDispatchService
     reconciler: WorkerResultReconciler
     implementation: ImplementationExecutionService
+    implementation_recovery: ImplementationClaimRecoveryService
     publication: VerifiedPublicationService
     completion: PublicationCompletionService
     runtime_watchdog: RuntimeHealthWatchdog
@@ -143,6 +145,9 @@ def create_v3_queue_service(
         implementation_model,
         ImplementationArtifactHandoff(implementation_store),
     )
+    implementation_recovery = ImplementationClaimRecoveryService(
+        tasks, transaction,
+    )
     publication = VerifiedPublicationService(
         tasks, transaction, implementation_store,
         lambda task: GitHubVerifiedPublisher(task.spec.repository, source_token_for_repository(task.spec.repository)),
@@ -155,7 +160,7 @@ def create_v3_queue_service(
         FirestoreRuntimeHealthStore(firestore_client, runtime_health_collection),
         _runtime_checks(tasks, provider_available, worker_identity_available), runtime_incident_reporter,
     )
-    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, publication, completion, watchdog)
+    return V3QueueRuntime(tasks, queue, dispatcher, reconciler, implementation, implementation_recovery, publication, completion, watchdog)
 
 
 def _control_plane_available(tasks: FirestoreV3TaskStore) -> bool:

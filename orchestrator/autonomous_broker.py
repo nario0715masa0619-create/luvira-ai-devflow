@@ -3,8 +3,8 @@ from execution_platform import ExecutionPlatformError, V3Status
 
 
 class AutonomousBroker:
-    def __init__(self, tasks, queue, dispatcher=None, reconciler=None, implementation=None, publication=None, completion=None, runtime_watchdog=None, approval_expiry=None):
-        self.tasks, self.queue, self.dispatcher, self.reconciler, self.implementation, self.publication, self.completion, self.runtime_watchdog, self.approval_expiry = tasks, queue, dispatcher, reconciler, implementation, publication, completion, runtime_watchdog, approval_expiry
+    def __init__(self, tasks, queue, dispatcher=None, reconciler=None, implementation=None, implementation_recovery=None, publication=None, completion=None, runtime_watchdog=None, approval_expiry=None):
+        self.tasks, self.queue, self.dispatcher, self.reconciler, self.implementation, self.implementation_recovery, self.publication, self.completion, self.runtime_watchdog, self.approval_expiry = tasks, queue, dispatcher, reconciler, implementation, implementation_recovery, publication, completion, runtime_watchdog, approval_expiry
 
     def sweep(self):
         """Attempt each eligible persisted task; retain approval on failure."""
@@ -28,6 +28,8 @@ class AutonomousBroker:
                 outcomes.append(("runtime", "RUNTIME_HEALTH_UNAVAILABLE", "monitor_unavailable"))
         if self.reconciler is not None:
             outcomes.extend(self.reconciler.sweep())
+        if self.implementation_recovery is not None:
+            outcomes.extend(self.implementation_recovery.sweep())
         if self.implementation is not None:
             outcomes.extend(self.implementation.sweep())
         if self.publication is not None:

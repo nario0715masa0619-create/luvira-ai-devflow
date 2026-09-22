@@ -31,6 +31,7 @@ def task_payload(task: V3Task) -> dict[str, Any]:
             "failure_code": task.execution.failure_code,
             "stream_events": task.execution.stream_events,
             "last_progress_at": task.execution.last_progress_at,
+            "implementation_claimed_at": task.execution.implementation_claimed_at,
             "publication_url": task.execution.publication_url,
             "revision": task.execution.revision,
         }
@@ -49,6 +50,7 @@ def task_from_payload(value: dict[str, Any]) -> V3Task:
             failure_code=execution_value.get("failure_code"),
             stream_events=execution_value.get("stream_events", 0),
             last_progress_at=execution_value.get("last_progress_at"),
+            implementation_claimed_at=execution_value.get("implementation_claimed_at"),
             publication_url=execution_value.get("publication_url"),
             revision=execution_value.get("revision", 1),
         )
@@ -142,6 +144,10 @@ class FirestoreV3TaskStore:
     def worker_health_verified(self):
         """Tasks eligible for exactly one Broker-held implementation request."""
         return self._with_status(V3Status.WORKER_HEALTH_VERIFIED.value)
+
+    def implementation_generating(self):
+        """Claims that must be reconciled without re-calling the provider."""
+        return self._with_status(V3Status.IMPLEMENTATION_GENERATING.value)
 
     def artifact_verified(self):
         return self._with_status(V3Status.ARTIFACT_VERIFIED.value)

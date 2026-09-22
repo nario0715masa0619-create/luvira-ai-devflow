@@ -49,6 +49,7 @@ class ImplementationExecutionServiceTest(unittest.TestCase):
 
         self.assertEqual(service.sweep(), [("task", "IMPLEMENTATION_ARTIFACT_VERIFIED", "execution-123")])
         self.assertEqual(task.status, V3Status.ARTIFACT_VERIFIED)
+        self.assertIsNotNone(task.execution.implementation_claimed_at)
         self.assertEqual(calls, [V3Status.IMPLEMENTATION_GENERATING, V3Status.ARTIFACT_VERIFIED])
 
     def test_validation_policy_never_calls_provider_or_reads_source(self):
@@ -139,3 +140,21 @@ class ImplementationExecutionServiceTest(unittest.TestCase):
         service.sweep()
         self.assertEqual(calls[0][0], 3)
         self.assertIsNotNone(calls[0][1])
+
+    def test_claim_persists_a_liveness_checkpoint_before_the_provider_call(self):
+        task, claimed = ready_task(), []
+        tasks = type("Tasks", (), {"worker_health_verified": lambda _: [task]})()
+        transaction = type("Tx", (), {
+            "claim_implementation": lambda _, _task, record: claimed.append((record.implementation_claimed_at, record.last_progress_at)),
+            "record_result": lambda *_: None,
+        })()
+        client = type("Client", (), {"generate_artifact": lambda _self, **kwargs: payload(
+            task_id=kwargs["envelope"]["task_id"], spec_hash=kwargs["envelope"]["spec_hash"],
+            base_commit=kwargs["envelope"]["base_commit"],
+        )})()
+        service = ImplementationExecutionService(tasks, transaction, lambda _: b"source", client, "kimi-k2.6", ImplementationArtifactHandoff(InMemoryImplementationArtifactStore()))
+
+        service.sweep()
+
+        self.assertEqual(len(claimed), 1)
+        self.assertEqual(claimed[0][0], claimed[0][1])

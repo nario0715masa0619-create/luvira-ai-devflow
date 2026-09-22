@@ -170,6 +170,7 @@ class ExecutionRecord:
     failure_code: str | None = None
     stream_events: int = 0
     last_progress_at: str | None = None
+    implementation_claimed_at: str | None = None
     publication_url: str | None = None
     revision: int = 1
 
