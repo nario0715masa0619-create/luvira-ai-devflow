@@ -95,13 +95,25 @@ class FirestoreV3TaskStore:
         task.revision += 1
 
     def pending_for_issue(self, issue_number: int) -> V3Task:
+        task = self.task_for_issue(issue_number)
+        if task.status is not V3Status.AWAITING_HUMAN_APPROVAL:
+            raise V3TaskStoreError("v3_task_not_found")
+        return task
+
+    def task_for_issue(self, issue_number: int) -> V3Task:
+        """Return one immutable approval task without changing its lifecycle.
+
+        This is deliberately separate from :meth:`pending_for_issue`: a
+        requester must still be able to observe a task after it has left the
+        human-approval state.  The query is read-only and returns no source,
+        prompt, credential, or approval-binding data.
+        """
         candidates = []
         for snapshot in self._collection.where(
             "spec.approval_context.source.issue_number", "==", issue_number
         ).stream():
             task = task_from_payload(snapshot.to_dict())
-            if task.status is V3Status.AWAITING_HUMAN_APPROVAL:
-                candidates.append(task)
+            candidates.append(task)
         if len(candidates) != 1:
             raise V3TaskStoreError("v3_task_not_found")
         return candidates[0]

@@ -1,0 +1,76 @@
+name: Monitor approved DevFlow task
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: GitHub approval Issue number
+        required: true
+        type: number
+      max_wait_minutes:
+        description: Read-only observation window (1-30 minutes)
+        required: false
+        default: '15'
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: google-github-actions/auth@v2
+        id: discovery_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval-discovery
+          service_account: devflow-approval-check@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+      - name: Discover the canonical orchestrator endpoint
+        id: orchestrator
+        run: |
+          set -euo pipefail
+          url="$(gcloud run services describe luvira-devflow-orchestrator --region us-central1 --project luvira-ai-control-plane --format='value(status.url)')"
+          test -n "$url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+      - uses: google-github-actions/auth@v2
+        id: request_auth
+        with:
+          workload_identity_provider: projects/660319628285/locations/global/workloadIdentityPools/github-actions/providers/github-human-approval-discovery
+          service_account: devflow-approval-check@luvira-ai-control-plane.iam.gserviceaccount.com
+          audience: https://github.com/nario0715masa0619-create
+          token_format: id_token
+          id_token_audience: ${{ steps.orchestrator.outputs.url }}
+          id_token_include_email: true
+      - name: Poll the requester-safe task status
+        env:
+          ID_TOKEN: ${{ steps.request_auth.outputs.id_token }}
+          ORCHESTRATOR_URL: ${{ steps.orchestrator.outputs.url }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          MAX_WAIT_MINUTES: ${{ inputs.max_wait_minutes }}
+        run: |
+          set -euo pipefail
+          case "$MAX_WAIT_MINUTES" in
+            ''|*[!0-9]*) echo 'max_wait_minutes must be an integer' >&2; exit 2 ;;
+          esac
+          test "$MAX_WAIT_MINUTES" -ge 1 && test "$MAX_WAIT_MINUTES" -le 30
+          deadline=$(( $(date +%s) + MAX_WAIT_MINUTES * 60 ))
+          while :; do
+            response="$(curl --fail --silent --show-error --header "Authorization: Bearer $ID_TOKEN" "$ORCHESTRATOR_URL/control-plane/v3/approval-issues/$ISSUE_NUMBER/status")"
+            status="$(jq --raw-output '.status' <<<"$response")"
+            terminal="$(jq --raw-output '.terminal' <<<"$response")"
+            echo "DevFlow status: $status"
+            jq --compact-output '{status, task_id, execution_status, failure_code, publication_url, terminal}' <<<"$response"
+            if [ "$terminal" = true ]; then
+              echo "## DevFlow task result" >> "$GITHUB_STEP_SUMMARY"
+              jq --raw-output '"- Status: `" + .status + "`\n- Task: `" + .task_id + "`\n- Draft PR: " + (.publication_url // "none") + "\n- Failure code: `" + (.failure_code // "none") + "`"' <<<"$response" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "## DevFlow task still running" >> "$GITHUB_STEP_SUMMARY"
+              jq --raw-output '"- Current status: `" + .status + "`\n- Task: `" + .task_id + "`\n- No write, retry, or cancellation was performed."' <<<"$response" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            sleep 15
+          done

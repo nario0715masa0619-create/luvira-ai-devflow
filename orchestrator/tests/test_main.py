@@ -9,6 +9,7 @@ from unittest.mock import patch
 os.environ["GITHUB_WEBHOOK_SECRET"] = "test-secret"
 import main
 from main import app
+from execution_platform import V3Status
 from project_onboarding import InMemoryProjectRegistry, ProjectOnboardingError, ProjectOnboardingService
 
 
@@ -133,6 +134,37 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json["task_id"], task.task_id)
         control_plane.pending_for_issue.assert_called_once_with(26)
+
+    def test_approval_issue_status_returns_requester_safe_published_result(self):
+        execution = unittest.mock.Mock(
+            status=V3Status.PUBLISHED,
+            failure_code=None,
+            publication_url="https://github.com/example/product/pull/42",
+        )
+        task = unittest.mock.Mock(task_id="github-issue-26-aaaaaaaaaaaaaaaa", status=V3Status.PUBLISHED,
+                                  execution=execution)
+        store = unittest.mock.Mock()
+        store.task_for_issue.return_value = task
+        with patch("main.V3_TASK_STORE", store):
+            response = self.client.get("/control-plane/v3/approval-issues/26/status")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json, {
+            "status": "PUBLISHED", "task_id": task.task_id,
+            "execution_status": "PUBLISHED", "failure_code": None,
+            "publication_url": "https://github.com/example/product/pull/42",
+            "terminal": True,
+        })
+        store.task_for_issue.assert_called_once_with(26)
+
+    def test_approval_issue_status_rejects_unknown_issue_without_task_data(self):
+        store = unittest.mock.Mock()
+        store.task_for_issue.side_effect = ValueError("v3_task_not_found")
+        with patch("main.V3_TASK_STORE", store):
+            response = self.client.get("/control-plane/v3/approval-issues/26/status")
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json, {"status": "BLOCKED", "reason": "task_not_found"})
 
     def test_private_authorization_rejects_unsafe_actor(self):
         response = self.client.post(

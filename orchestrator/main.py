@@ -273,6 +273,41 @@ def pending_approval_issue(issue_number):
                    approval_binding=task.approval_binding), 200
 
 
+@app.get("/control-plane/v3/approval-issues/<int:issue_number>/status")
+def approval_issue_status(issue_number):
+    """Return the requester-safe terminal or in-progress state for one Issue.
+
+    Cloud Run authentication remains the access boundary.  This endpoint is
+    read-only and intentionally excludes the approval binding, source
+    snapshot, model output, and all credentials.  It exists so Orca can keep
+    a requester informed after the human decision rather than treating the
+    approval workflow as the end of the task.
+    """
+    if V3_TASK_STORE is None:
+        return jsonify(status="BLOCKED", reason="v3_control_plane_not_configured"), 503
+    try:
+        task = V3_TASK_STORE.task_for_issue(issue_number)
+    except Exception as exc:
+        if str(exc) == "v3_task_not_found":
+            return jsonify(status="BLOCKED", reason="task_not_found"), 404
+        logging.exception("V3_TASK_STATUS_BLOCKED task lookup failed")
+        return jsonify(status="BLOCKED", reason="v3_task_status_unavailable"), 503
+
+    execution = task.execution
+    return jsonify(
+        status=task.status.value,
+        task_id=task.task_id,
+        execution_status=execution.status.value if execution else None,
+        failure_code=execution.failure_code if execution else None,
+        publication_url=execution.publication_url if execution else None,
+        terminal=task.status in {
+            V3Status.NO_CHANGE_DETECTED, V3Status.EXECUTION_FAILED_FINAL,
+            V3Status.PUBLISHED, V3Status.MERGED, V3Status.REJECTED,
+            V3Status.CANCELLED, V3Status.EXPIRED,
+        },
+    ), 200
+
+
 def project_approval_binding(record):
     """Bind a human decision to exactly one immutable onboarding request."""
     canonical = json.dumps(project_payload(record), sort_keys=True, separators=(",", ":"))
