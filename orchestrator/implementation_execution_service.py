@@ -71,6 +71,13 @@ class ImplementationExecutionService:
                 continue
             try:
                 ExecutionPlatform.begin_implementation_existing(task, record.execution_id)
+                # This is a durable liveness checkpoint, not a task deadline.
+                # If the broker dies after claiming a non-replayable provider
+                # call, a later sweep can prove that no progress followed the
+                # claim and stop safely instead of spending again.
+                claimed_at = datetime.now(timezone.utc).isoformat()
+                record.implementation_claimed_at = claimed_at
+                record.last_progress_at = claimed_at
                 self._transaction.claim_implementation(task, record)
             except Exception:
                 outcomes.append((task.task_id, "IMPLEMENTATION_CLAIM_UNAVAILABLE", record.execution_id))

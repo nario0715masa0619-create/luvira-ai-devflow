@@ -52,3 +52,12 @@ class AutonomousBrokerTest(unittest.TestCase):
         outcome = AutonomousBroker(tasks, queue, approval_expiry=expiry).sweep()
 
         self.assertEqual(outcome, [("approval_expiry", "APPROVAL_EXPIRY_UNAVAILABLE", "retry_pending"), ("t", "QUEUED", "internal")])
+
+    def test_claim_recovery_runs_before_any_new_implementation_work(self):
+        tasks = type("Tasks", (), {"eligible": lambda _: []})()
+        queue = object()
+        recovery = type("Recovery", (), {"sweep": lambda _: [("stalled", "IMPLEMENTATION_CLAIM_STALLED_FINAL", "execution")]})()
+
+        outcome = AutonomousBroker(tasks, queue, implementation_recovery=recovery).sweep()
+
+        self.assertEqual(outcome, [("stalled", "IMPLEMENTATION_CLAIM_STALLED_FINAL", "execution")])
