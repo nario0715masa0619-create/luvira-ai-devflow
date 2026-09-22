@@ -43,6 +43,7 @@ class V3Status(str, Enum):
     WORKER_HEALTH_VERIFIED = "WORKER_HEALTH_VERIFIED"
     VALIDATION_SUCCEEDED = "VALIDATION_SUCCEEDED"
     IMPLEMENTATION_GENERATING = "IMPLEMENTATION_GENERATING"
+    NO_CHANGE_DETECTED = "NO_CHANGE_DETECTED"
     ARTIFACT_VERIFIED = "ARTIFACT_VERIFIED"
     REVIEWING = "REVIEWING"
     READY_TO_PUBLISH = "READY_TO_PUBLISH"
@@ -399,6 +400,25 @@ class ExecutionPlatform:
         task.execution.status = V3Status.ARTIFACT_VERIFIED
         task.status = V3Status.ARTIFACT_VERIFIED
         task.audit.append("ARTIFACT_VERIFIED")
+        return task
+
+    @staticmethod
+    def complete_no_change_existing(task: V3Task, execution_id: str) -> V3Task:
+        """Finish an implementation attempt that produced no source diff.
+
+        This is deliberately distinct from success with a verified artifact:
+        no draft PR can be published from it.  It is also distinct from a
+        Worker or provider failure, because retrying an unchanged request
+        would repeat the same spend without producing work.
+        """
+        if task.status is not V3Status.IMPLEMENTATION_GENERATING:
+            raise TransitionRejected(f"invalid_transition_from_{task.status.value}")
+        if task.execution is None or task.execution.execution_id != execution_id:
+            raise TransitionRejected("execution_identity_mismatch")
+        task.execution.failure_code = "NO_CHANGE_DETECTED"
+        task.execution.status = V3Status.NO_CHANGE_DETECTED
+        task.status = V3Status.NO_CHANGE_DETECTED
+        task.audit.append("NO_CHANGE_DETECTED")
         return task
 
     @staticmethod

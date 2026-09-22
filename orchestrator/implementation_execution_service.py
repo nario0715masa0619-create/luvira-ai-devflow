@@ -113,6 +113,18 @@ class ImplementationExecutionService:
                 self._fail(task, record, exc.code, outcomes)
                 continue
             except ImplementationArtifactHandoffError as exc:
+                if str(exc) == "artifact_no_effect":
+                    # The approved source snapshot already matches the model's
+                    # complete-file proposal.  Do not misreport that as an
+                    # execution failure or retry and spend again.  This state
+                    # cannot publish a PR; it records the no-op explicitly.
+                    try:
+                        ExecutionPlatform.complete_no_change_existing(task, record.execution_id)
+                        self._transaction.record_result(task, record, V3Status.NO_CHANGE_DETECTED)
+                        outcomes.append((task.task_id, "NO_CHANGE_DETECTED", record.execution_id))
+                    except Exception:
+                        outcomes.append((task.task_id, "NO_CHANGE_RESULT_UNAVAILABLE", record.execution_id))
+                    continue
                 # The handoff includes only the verifier's stable error code.
                 # Preserve it in the durable failure record so recovery can be
                 # based on the failed contract rule, without retaining model

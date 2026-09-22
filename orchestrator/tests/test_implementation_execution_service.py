@@ -87,6 +87,26 @@ class ImplementationExecutionServiceTest(unittest.TestCase):
         self.assertEqual(service.sweep(), [("task", "EXECUTION_FAILED_FINAL", "execution-123")])
         self.assertEqual(task.execution.failure_code, "artifact_schema_mismatch")
 
+    def test_no_effect_is_terminal_without_retry_or_publication(self):
+        task, calls = ready_task(), []
+        tasks = type("Tasks", (), {"worker_health_verified": lambda _: [task]})()
+        transaction = type("Tx", (), {
+            "claim_implementation": lambda *_: None,
+            "record_result": lambda _, current, __, status: calls.append(status),
+        })()
+        client = type("Client", (), {"generate_artifact": lambda *_args, **_kwargs: b"ignored"})()
+        handoff = type("Handoff", (), {
+            "receive_from_broker": lambda *_, **__: (_ for _ in ()).throw(
+                ImplementationArtifactHandoffError("artifact_no_effect")
+            )
+        })()
+        service = ImplementationExecutionService(tasks, transaction, lambda _: b"source", client, "kimi-k2.6", handoff)
+
+        self.assertEqual(service.sweep(), [("task", "NO_CHANGE_DETECTED", "execution-123")])
+        self.assertEqual(task.status, V3Status.NO_CHANGE_DETECTED)
+        self.assertEqual(task.execution.failure_code, "NO_CHANGE_DETECTED")
+        self.assertEqual(calls, [V3Status.NO_CHANGE_DETECTED])
+
     def test_source_failure_is_not_reported_as_an_artifact_rejection(self):
         task = ready_task()
         tasks = type("Tasks", (), {"worker_health_verified": lambda _: [task]})()
