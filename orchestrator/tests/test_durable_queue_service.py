@@ -36,6 +36,11 @@ class Transaction:
             raise RuntimeError("storage unavailable")
         self.calls.append((task, record))
 
+    def record_retry_exhausted(self, task, record):
+        if self.fail:
+            raise RuntimeError("storage unavailable")
+        self.calls.append(("retry_exhausted", task, record))
+
 
 def preflight(passed=True):
     return ExecutionPreflight([
@@ -91,3 +96,19 @@ class DurableQueueServiceTest(unittest.TestCase):
         self.assertEqual(record.attempt, 2)
         self.assertNotEqual(record.execution_id, "previous")
         self.assertEqual(task.status, V3Status.EXECUTION_QUEUED)
+
+    def test_retry_budget_terminalizes_without_launching_a_fourth_execution(self):
+        task = authorized_task()
+        task.status = V3Status.EXECUTION_FAILED_RETRYABLE
+        task.execution = ExecutionRecord(
+            "third", task.task_id, task.spec.hash, 3,
+            V3Status.EXECUTION_FAILED_RETRYABLE, failure_code="WORKER_EXECUTION_RETRYABLE",
+        )
+        transaction = Transaction()
+
+        with self.assertRaisesRegex(DurableQueueRejected, "safe_recovery_attempts_exhausted"):
+            DurableQueueService(Reader(task), preflight(), transaction).request(task.task_id)
+
+        self.assertEqual(task.status, V3Status.EXECUTION_FAILED_FINAL)
+        self.assertEqual(task.execution.failure_code, "SAFE_RECOVERY_ATTEMPTS_EXHAUSTED_FINAL")
+        self.assertEqual(transaction.calls[0][0], "retry_exhausted")

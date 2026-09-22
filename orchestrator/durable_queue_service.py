@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from execution_platform import ExecutionPlatform, ExecutionPlatformError, ExecutionRecord, V3Task
+from execution_platform import ExecutionPlatform, ExecutionPlatformError, ExecutionRecord, V3Status, V3Task
 from execution_preflight import ExecutionPreflight, PreflightReport
 
 
@@ -19,6 +19,7 @@ class V3TaskReader(Protocol):
 
 class QueueTransaction(Protocol):
     def queue_authorized(self, task: V3Task, record: ExecutionRecord) -> None: ...
+    def record_retry_exhausted(self, task: V3Task, record: ExecutionRecord) -> None: ...
 
 
 class DurableQueueRejected(ExecutionPlatformError):
@@ -31,13 +32,33 @@ class DurableQueueService:
         tasks: V3TaskReader,
         preflight: ExecutionPreflight,
         transaction: QueueTransaction,
+        *,
+        max_safe_attempts: int = 3,
     ):
         self._tasks = tasks
         self._preflight = preflight
         self._transaction = transaction
+        if not isinstance(max_safe_attempts, int) or max_safe_attempts < 1:
+            raise ValueError("max_safe_attempts_invalid")
+        self._max_safe_attempts = max_safe_attempts
 
     def request(self, task_id: str) -> tuple[ExecutionRecord, PreflightReport]:
         task = self._tasks.get(task_id)
+        if (task.status is V3Status.EXECUTION_FAILED_RETRYABLE
+                and task.execution is not None
+                and task.execution.attempt >= self._max_safe_attempts):
+            original_status, original_execution, original_audit = (
+                task.status, task.execution, list(task.audit),
+            )
+            try:
+                ExecutionPlatform.exhaust_retry_existing(task, task.execution.execution_id)
+                self._transaction.record_retry_exhausted(task, task.execution)
+            except Exception as exc:
+                task.status, task.execution, task.audit = (
+                    original_status, original_execution, original_audit,
+                )
+                raise DurableQueueRejected("safe_recovery_exhaustion_not_durable") from exc
+            raise DurableQueueRejected("safe_recovery_attempts_exhausted")
         report = self._preflight.run(task.spec)
         if not report.passed:
             # The report is intentionally limited to stable public codes.  Keep
