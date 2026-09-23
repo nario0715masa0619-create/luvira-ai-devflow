@@ -68,6 +68,8 @@ AIには役割を分担させ、同じ仕事を複数のAIに重複してやら�
 プロジェクト共通の禁止事項・要承認事項
 `docs/context-lock-standard.md`
 AI間の手動コピペを不要にする、案件・リポジトリ・Issue・許可範囲の共通安全契約
+`docs/user-observable-completion-standard.md`
+内部実装の成功ではなく、利用者が実際に確認できる結果を完了条件にする共通基準
 `docs/project-adoption-guide.md`
 個別案件が共通安全ゲートを明示的に採用するための最小手順
 `docs/independent-ai-reviewer-identity-standard.md`
