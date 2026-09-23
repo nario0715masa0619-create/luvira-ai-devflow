@@ -135,7 +135,7 @@ class EventTest(unittest.TestCase):
         self.assertEqual(response.json["task_id"], task.task_id)
         control_plane.pending_for_issue.assert_called_once_with(26)
 
-    def test_approval_issue_status_returns_requester_safe_published_result(self):
+    def test_approval_issue_status_keeps_published_result_open_until_merge(self):
         execution = unittest.mock.Mock(
             status=V3Status.PUBLISHED,
             failure_code=None,
@@ -154,7 +154,7 @@ class EventTest(unittest.TestCase):
             "execution_status": "PUBLISHED", "failure_code": None,
             "publication_url": "https://github.com/example/product/pull/42",
             "checkpoint": "DRAFT_PR", "recovery_action": "AWAIT_HUMAN_MERGE",
-            "terminal": True,
+            "terminal": False,
         })
         store.task_for_issue.assert_called_once_with(26)
 

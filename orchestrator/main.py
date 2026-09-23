@@ -306,7 +306,7 @@ def approval_issue_status(issue_number):
         recovery_action=recovery_action,
         terminal=task.status in {
             V3Status.NO_CHANGE_DETECTED, V3Status.EXECUTION_FAILED_FINAL,
-            V3Status.PUBLISHED, V3Status.MERGED, V3Status.REJECTED,
+            V3Status.MERGED, V3Status.REJECTED,
             V3Status.CANCELLED, V3Status.EXPIRED,
         },
     ), 200
