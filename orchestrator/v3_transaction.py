@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Callable
 
 from google.cloud import firestore
@@ -63,7 +64,7 @@ class V3Transaction:
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
 
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def begin_queued(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -93,7 +94,7 @@ class V3Transaction:
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
 
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def record_worker_execution_identified(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -126,7 +127,7 @@ class V3Transaction:
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
 
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def record_launch_operation(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -157,7 +158,7 @@ class V3Transaction:
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
 
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def record_result(self, task: V3Task, record: ExecutionRecord, expected_status: V3Status) -> None:
@@ -187,7 +188,7 @@ class V3Transaction:
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
 
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def record_retry_exhausted(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -213,7 +214,7 @@ class V3Transaction:
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
 
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def claim_implementation(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -236,7 +237,7 @@ class V3Transaction:
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
 
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def record_implementation_progress(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -260,7 +261,7 @@ class V3Transaction:
             payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
 
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def record_publication(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -277,7 +278,7 @@ class V3Transaction:
                 raise V3TransactionError("publication_not_recordable")
             payload = task_payload(task); payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def record_publication_recovery(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -297,7 +298,7 @@ class V3Transaction:
                 raise V3TransactionError("publication_recovery_not_recordable")
             payload = task_payload(task); payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
     def record_merge(self, task: V3Task, record: ExecutionRecord) -> None:
@@ -319,12 +320,26 @@ class V3Transaction:
                 raise V3TransactionError("merge_not_recordable")
             payload = task_payload(task); payload["revision"] = task.revision + 1
             transaction.update(task_ref, payload)
-        self._run_transaction(write)
+        self._run_transaction(write, task)
         task.revision += 1
 
-    def _run_transaction(self, write: Callable[[Any], None]) -> None:
+    def _run_transaction(self, write: Callable[[Any], None], task: V3Task) -> None:
         transaction = self.client.transaction()
         # The client hook keeps this adapter unit-testable. Production Firestore
         # clients use the official retrying transaction decorator.
         decorator = getattr(self.client, "transactional", None) or firestore.transactional
         decorator(write)(transaction)
+        # Cloud Run adds the timestamp and execution identity.  Keep the
+        # payload deliberately small: no task specification, source text, or
+        # provider response can enter the audit stream.
+        record = task.execution
+        logging.info(
+            "DEVFLOW_TASK_TRANSITION task_id=%s event=%s status=%s execution_id=%s "
+            "execution_status=%s failure_code=%s",
+            task.task_id,
+            task.audit[-1] if task.audit else "STATE_PERSISTED",
+            task.status.value,
+            record.execution_id if record else None,
+            record.status.value if record else None,
+            record.failure_code if record else None,
+        )
